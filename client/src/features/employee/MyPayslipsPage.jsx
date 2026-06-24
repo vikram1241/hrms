@@ -1,0 +1,45 @@
+import { useMemo, useState } from 'react';
+import TextField from '@mui/material/TextField';
+import MenuItem from '@mui/material/MenuItem';
+import Tooltip from '@mui/material/Tooltip';
+import { Download } from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader.jsx';
+import DataGrid from '../../components/ui/DataGrid.jsx';
+import { Card } from '../../components/ui/Card.jsx';
+import useAsync from '../../hooks/useAsync.js';
+import { listMyPayslips, payslipPdfUrl } from '../../api/payslips.js';
+import { MONTHS, YEARS } from '../../config/constants.js';
+import { formatINR } from '../../lib/money.js';
+
+const monthName = (m) => MONTHS.find((x) => x.value === m)?.label || m;
+
+export default function MyPayslipsPage() {
+  const [year, setYear] = useState('');
+  const { data: slips, loading } = useAsync(() => listMyPayslips(year ? { year } : {}), [year]);
+
+  const columnDefs = useMemo(() => [
+    { headerName: 'Statement Cycle', valueGetter: (p) => `${monthName(p.data.month)} ${p.data.year}`, minWidth: 180, flex: 1.5 },
+    { headerName: 'Gross', valueGetter: (p) => p.data.financialSummary?.grossEarnings, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'Deductions', valueGetter: (p) => p.data.financialSummary?.totalDeductions, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'Net Take-Home', valueGetter: (p) => p.data.financialSummary?.netPay, valueFormatter: (p) => formatINR(p.value), cellClass: 'font-semibold' },
+    {
+      headerName: 'Action', filter: false, sortable: false, maxWidth: 120,
+      cellRenderer: (p) => (
+        <Tooltip title="Download PDF"><a className="btn-ghost p-2 text-primary-600" href={payslipPdfUrl(p.data._id)} target="_blank" rel="noreferrer"><Download size={16} /></a></Tooltip>
+      )
+    }
+  ], []);
+
+  return (
+    <div>
+      <PageHeader title="My Salary Slips" subtitle="Your historical pay statements" />
+      <Card className="mb-4 p-4">
+        <TextField select size="small" label="Financial Year" value={year} onChange={(e) => setYear(e.target.value)} sx={{ minWidth: 180 }}>
+          <MenuItem value="">All years</MenuItem>
+          {YEARS.map((y) => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+        </TextField>
+      </Card>
+      <DataGrid rowData={slips || []} columnDefs={columnDefs} loading={loading} height={520} paginationPageSize={12} />
+    </div>
+  );
+}

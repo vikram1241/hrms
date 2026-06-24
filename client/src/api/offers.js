@@ -1,0 +1,14 @@
+import api from '../lib/axios.js';
+
+export const listOffers = (params) => api.get('/offers', { params }).then((r) => r.data);
+export const getOffer = (id) => api.get(`/offers/${id}`).then((r) => r.data.offer);
+export const createOffer = (body) => api.post('/offers', body).then((r) => r.data);
+export const updateOfferStatus = (id, status) => api.patch(`/offers/${id}/status`, { status }).then((r) => r.data.offer);
+export const resendOffer = (id) => api.post(`/offers/${id}/resend`).then((r) => r.data);
+export const offerPdfUrl = (id) => `/api/offers/${id}/pdf`;
+
+export const bulkUploadOffers = (file) => {
+  const fd = new FormData();
+  fd.append('roster', file);
+  return api.post('/offers/bulk', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+};

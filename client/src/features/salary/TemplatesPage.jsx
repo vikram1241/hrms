@@ -1,0 +1,101 @@
+import { useState } from 'react';
+import { useDispatch } from 'react-redux';
+import { Plus, Pencil, Power, SlidersHorizontal } from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader.jsx';
+import { Card, CardBody } from '../../components/ui/Card.jsx';
+import Button from '../../components/ui/Button.jsx';
+import Spinner from '../../components/ui/Spinner.jsx';
+import EmptyState from '../../components/ui/EmptyState.jsx';
+import StatusBadge from '../../components/ui/StatusBadge.jsx';
+import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
+import TemplateDialog from './TemplateDialog.jsx';
+import useAsync from '../../hooks/useAsync.js';
+import { listTemplates, deactivateTemplate } from '../../api/salary.js';
+import { CALC_TYPES } from '../../config/constants.js';
+import { notifySuccess, notifyError } from '../ui/toastSlice.js';
+
+const typeLabel = (t) => CALC_TYPES.find((c) => c.value === t)?.label || t;
+
+export default function TemplatesPage() {
+  const dispatch = useDispatch();
+  const { data: templates, loading, reload } = useAsync(() => listTemplates(), []);
+  const [dialog, setDialog] = useState({ open: false, template: null });
+  const [deactivateTarget, setDeactivateTarget] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const onDeactivate = async () => {
+    setBusy(true);
+    try {
+      await deactivateTemplate(deactivateTarget._id);
+      dispatch(notifySuccess('Template deactivated.'));
+      setDeactivateTarget(null);
+      reload();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader
+        title="Setup Templates" subtitle="Reusable salary calculation models"
+        actions={<Button onClick={() => setDialog({ open: true, template: null })}><Plus size={16} /> New Salary Model</Button>}
+      />
+
+      {loading ? (
+        <div className="flex justify-center py-20"><Spinner size={32} className="text-primary-600" /></div>
+      ) : !templates?.length ? (
+        <Card><EmptyState icon={SlidersHorizontal} title="No salary models yet" message="Create your first reusable salary structure to assign to employees." /></Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {templates.map((t) => (
+            <Card key={t._id}>
+              <CardBody>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-ink">{t.name}</h3>
+                    {t.description && <p className="text-sm text-muted">{t.description}</p>}
+                  </div>
+                  <StatusBadge status={t.isActive ? 'active' : 'inactive'} />
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary-700">Earnings</p>
+                    <ul className="space-y-1 text-sm">
+                      {t.earningsStructure.map((e) => (
+                        <li key={e.key} className="flex justify-between gap-2"><span className="text-muted">{e.label}</span><span className="text-ink">{typeLabel(e.calculationType)}</span></li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-danger">Deductions</p>
+                    <ul className="space-y-1 text-sm">
+                      {t.deductionsStructure.map((d) => (
+                        <li key={d.key} className="flex justify-between gap-2"><span className="text-muted">{d.label}</span><span className="text-ink">{typeLabel(d.calculationType)}</span></li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-end gap-2 border-t border-line pt-3">
+                  <Button variant="secondary" size="sm" onClick={() => setDialog({ open: true, template: t })}><Pencil size={14} /> Edit</Button>
+                  {t.isActive && <Button variant="ghost" size="sm" className="text-danger" onClick={() => setDeactivateTarget(t)}><Power size={14} /> Deactivate</Button>}
+                </div>
+              </CardBody>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <TemplateDialog open={dialog.open} template={dialog.template} onClose={() => setDialog({ open: false, template: null })} onSaved={reload} />
+      <ConfirmDialog
+        open={Boolean(deactivateTarget)} onClose={() => setDeactivateTarget(null)} onConfirm={onDeactivate} loading={busy}
+        title="Deactivate template?" confirmLabel="Deactivate"
+        message="It will no longer be selectable for new assignments. Existing assignments keep their frozen breakdown."
+      />
+    </div>
+  );
+}

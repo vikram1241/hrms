@@ -1,0 +1,41 @@
+import mongoose from 'mongoose';
+
+const PaySlipLineItemSchema = new mongoose.Schema({
+  label: { type: String, required: true },
+  // Amount in paisa (integer).
+  amount: { type: Number, required: true }
+}, { _id: false });
+
+const SalarySlipSchema = new mongoose.Schema({
+  employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  month: { type: Number, required: true, min: 1, max: 12 },
+  year: { type: Number, required: true, min: 2000 },
+
+  metaSnapshot: {
+    employeeDisplayId: { type: String, required: true },
+    fullName: { type: String, required: true },
+    designation: { type: String, required: true },
+    department: { type: String, required: true },
+    pan: { type: String },
+    uan: { type: String },
+    bankAccountHidden: { type: String }
+  },
+
+  earningsLedger: [PaySlipLineItemSchema],
+  deductionsLedger: [PaySlipLineItemSchema],
+
+  financialSummary: {
+    grossEarnings: { type: Number, required: true },
+    totalDeductions: { type: Number, required: true },
+    netPay: { type: Number, required: true },
+    netPayInWords: { type: String, required: true }
+  },
+
+  pdfUrl: { type: String, required: true },
+  isEmailed: { type: Boolean, default: false },
+  paymentStatus: { type: String, enum: ['Paid', 'Processing', 'On-Hold'], default: 'Paid' }
+}, { timestamps: true });
+
+SalarySlipSchema.index({ employeeId: 1, month: 1, year: 1 }, { unique: true });
+
+export default mongoose.model('SalarySlip', SalarySlipSchema);
