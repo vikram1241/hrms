@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import InputAdornment from '@mui/material/InputAdornment';
 import FormDialog from '../../components/ui/FormDialog.jsx';
+import CurrencyField from '../../components/ui/CurrencyField.jsx';
 import { listTemplates, assignSalary, getAssignment } from '../../api/salary.js';
 import { fullName } from '../../config/constants.js';
 import { formatINR, paisaToRupees } from '../../lib/money.js';
@@ -22,7 +22,7 @@ export default function AssignSalaryDialog({ open, user, onClose }) {
     setPreview(null); setCtc(''); setTemplateId('');
     listTemplates({ activeOnly: true }).then(setTemplates).catch(() => {});
     getAssignment(user._id)
-      .then((a) => { if (a) { setTemplateId(a.templateId?._id || a.templateId); setCtc(String(paisaToRupees(a.annualCTC))); } })
+      .then((a) => { if (a) { setTemplateId(a.templateId?._id || a.templateId); setCtc(paisaToRupees(a.annualCTC)); } })
       .catch(() => {}); // 404 = no existing assignment
   }, [open, user]);
 
@@ -49,11 +49,7 @@ export default function AssignSalaryDialog({ open, user, onClose }) {
         <TextField label="Salary Template" value={templateId} onChange={(e) => setTemplateId(e.target.value)} select fullWidth required>
           {templates.map((t) => <MenuItem key={t._id} value={t._id}>{t.name}</MenuItem>)}
         </TextField>
-        <TextField
-          label="Annual CTC" type="number" value={ctc} onChange={(e) => setCtc(e.target.value)} fullWidth required
-          slotProps={{ input: { startAdornment: <InputAdornment position="start">₹</InputAdornment> } }}
-          helperText="Enter the annual CTC in rupees"
-        />
+        <CurrencyField value={ctc} onChange={setCtc} required helperText="Enter the annual CTC in rupees" />
 
         {preview && (
           <div className="rounded-lg bg-primary-50 p-4 text-sm">

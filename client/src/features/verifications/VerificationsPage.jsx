@@ -11,7 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import { listUsers } from '../../api/users.js';
 import { listUserDocuments, verifyDocument, documentFileUrl } from '../../api/documents.js';
-import { fullName } from '../../config/constants.js';
+import { fullName, DOC_TYPE_LABEL } from '../../config/constants.js';
 import { cn } from '../../lib/cn.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
@@ -133,8 +133,8 @@ export default function VerificationsPage() {
                         <li key={fid} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
                           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600"><FileText size={18} /></span>
                           <div className="min-w-0 flex-1">
-                            <p className="font-medium text-ink">{d.documentType}</p>
-                            <p className="text-xs text-muted">{d.documentNumber} · {new Date(d.uploadedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
+                            <p className="font-medium text-ink">{d.documentName || DOC_TYPE_LABEL[d.documentType] || d.documentType}</p>
+                            <p className="text-xs text-muted">{DOC_TYPE_LABEL[d.documentType] || d.documentType} · Ref: {d.documentNumber} · {new Date(d.uploadedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
                           </div>
                           <StatusBadge status={d.verificationStatus?.toLowerCase()} />
                           <div className="flex items-center gap-1.5">

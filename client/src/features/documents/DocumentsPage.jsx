@@ -13,7 +13,7 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { listMyDocuments, uploadDocument, deleteDocument, documentFileUrl } from '../../api/documents.js';
-import { DOC_TYPES } from '../../config/constants.js';
+import { DOC_TYPES, DOC_TYPE_LABEL } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const fileIdOf = (doc) => doc.fileUrl?.split('/').pop()?.replace('.pdf', '');
@@ -22,7 +22,7 @@ export default function DocumentsPage() {
   const dispatch = useDispatch();
   const fileRef = useRef(null);
   const { data: docs, loading, reload } = useAsync(() => listMyDocuments(), []);
-  const [form, setForm] = useState({ documentType: 'PAN', documentNumber: '' });
+  const [form, setForm] = useState({ documentType: 'PAN', documentName: '', documentNumber: '' });
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -37,7 +37,7 @@ export default function DocumentsPage() {
     try {
       await uploadDocument({ file, ...form });
       dispatch(notifySuccess('Document uploaded for verification.'));
-      setForm({ documentType: 'PAN', documentNumber: '' });
+      setForm({ documentType: 'PAN', documentName: '', documentNumber: '' });
       setFile(null);
       reload();
     } catch (err) {
@@ -72,9 +72,10 @@ export default function DocumentsPage() {
           <CardBody>
             <form onSubmit={upload} className="space-y-4">
               <TextField select size="small" label="Document Type" value={form.documentType} onChange={(e) => setForm({ ...form, documentType: e.target.value })} fullWidth>
-                {DOC_TYPES.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
+                {DOC_TYPES.map((d) => <MenuItem key={d.value} value={d.value}>{d.label}</MenuItem>)}
               </TextField>
-              <TextField size="small" label="Document Number" value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })} fullWidth required />
+              <TextField size="small" label="Document Name" placeholder="e.g. B.Tech Degree Certificate" value={form.documentName} onChange={(e) => setForm({ ...form, documentName: e.target.value })} fullWidth required />
+              <TextField size="small" label="Document Reference Number" value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })} fullWidth required />
               <div onClick={() => fileRef.current?.click()} className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-line p-5 text-center hover:border-primary-300">
                 <UploadCloud size={26} className="text-primary-500" />
                 <p className="text-sm text-ink">{file ? file.name : 'Choose a PDF (max 5MB)'}</p>
@@ -101,8 +102,8 @@ export default function DocumentsPage() {
                     <li key={fid} className="flex items-center gap-3 px-5 py-3.5">
                       <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600"><FileText size={18} /></span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-ink">{d.documentType}</p>
-                        <p className="truncate text-xs text-muted">{d.documentNumber}</p>
+                        <p className="truncate font-medium text-ink">{d.documentName || DOC_TYPE_LABEL[d.documentType] || d.documentType}</p>
+                        <p className="truncate text-xs text-muted">{DOC_TYPE_LABEL[d.documentType] || d.documentType} · Ref: {d.documentNumber}</p>
                       </div>
                       <StatusBadge status={d.verificationStatus?.toLowerCase()} />
                       <Tooltip title="View"><a className="btn-ghost p-2 text-primary-600" href={documentFileUrl(fid)} target="_blank" rel="noreferrer"><Eye size={16} /></a></Tooltip>

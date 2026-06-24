@@ -1,6 +1,21 @@
 export const DEPARTMENTS = ['Engineering', 'HR', 'Sales', 'Marketing', 'Finance', 'Operations', 'Design'];
 export const ROLES = ['admin', 'hr', 'employee'];
-export const DOC_TYPES = ['Aadhar', 'PAN', 'Passport', 'VoterID', 'DegreeCertificate', 'RelievingLetter', 'Payslip'];
+// Document types shown in the upload dropdown (RelievingLetter intentionally omitted).
+export const DOC_TYPES = [
+  { value: 'PAN', label: 'PAN' },
+  { value: 'Aadhar', label: 'Aadhar' },
+  { value: 'Passport', label: 'Passport' },
+  { value: 'VoterID', label: 'Voter ID' },
+  { value: 'EducationCertificate', label: 'Education Certificate' },
+  { value: 'Payslip', label: 'Payslip' }
+];
+
+// Friendly labels for displaying any stored documentType (incl. legacy values).
+export const DOC_TYPE_LABEL = {
+  PAN: 'PAN', Aadhar: 'Aadhar', Passport: 'Passport', VoterID: 'Voter ID',
+  EducationCertificate: 'Education Certificate', DegreeCertificate: 'Education Certificate',
+  RelievingLetter: 'Relieving Letter', Payslip: 'Payslip'
+};
 export const OFFER_STATUSES = ['sent', 'pending', 'accepted', 'declined'];
 export const CALC_TYPES = [
   { value: 'fixed', label: 'Fixed amount (₹)' },

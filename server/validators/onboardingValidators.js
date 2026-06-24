@@ -40,8 +40,9 @@ export const bankRules = [
 ];
 
 export const documentUploadRules = [
-  body('documentType').isIn(['Aadhar', 'PAN', 'Passport', 'VoterID', 'DegreeCertificate', 'RelievingLetter', 'Payslip']).withMessage('Invalid document type'),
-  body('documentNumber').isString().trim().notEmpty().withMessage('Document number is required')
+  body('documentType').isIn(['Aadhar', 'PAN', 'Passport', 'VoterID', 'DegreeCertificate', 'EducationCertificate', 'RelievingLetter', 'Payslip']).withMessage('Invalid document type'),
+  body('documentName').optional().isString().trim(),
+  body('documentNumber').isString().trim().notEmpty().withMessage('Document reference number is required')
 ];
 
 export const verifyDocumentRules = [

@@ -5,12 +5,13 @@ import MenuItem from '@mui/material/MenuItem';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Tooltip from '@mui/material/Tooltip';
-import { Zap, Download, RefreshCw } from 'lucide-react';
+import { Zap, Download, RefreshCw, Eye } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import DataGrid from '../../components/ui/DataGrid.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
+import SalarySlipPreview from './SalarySlipPreview.jsx';
 import { listPayslips, generatePayslips, payslipPdfUrl } from '../../api/payslips.js';
 import { MONTHS, YEARS } from '../../config/constants.js';
 import { formatINR } from '../../lib/money.js';
@@ -25,6 +26,7 @@ export default function PayslipsPage() {
   const [generating, setGenerating] = useState(false);
   const [notify, setNotify] = useState(false);
   const [selected, setSelected] = useState([]);
+  const [preview, setPreview] = useState(null);
 
   const fetchSlips = async () => {
     setLoading(true);
@@ -62,9 +64,10 @@ export default function PayslipsPage() {
     { headerName: 'Net Pay', valueGetter: (p) => p.data.financialSummary?.netPay, valueFormatter: (p) => formatINR(p.value), maxWidth: 150 },
     { headerName: 'Status', field: 'paymentStatus', cellRenderer: (p) => <StatusBadge status={p.value} />, filter: false, maxWidth: 150 },
     {
-      headerName: 'Actions', filter: false, sortable: false, maxWidth: 130,
+      headerName: 'Actions', filter: false, sortable: false, maxWidth: 160,
       cellRenderer: (p) => (
         <div className="flex h-full items-center gap-1">
+          <Tooltip title="Preview"><button className="btn-ghost p-2 text-primary-600" onClick={() => setPreview(p.data)}><Eye size={16} /></button></Tooltip>
           <Tooltip title="Download PDF"><a className="btn-ghost p-2 text-primary-600" href={payslipPdfUrl(p.data._id)} target="_blank" rel="noreferrer"><Download size={16} /></a></Tooltip>
           <Tooltip title="Regenerate"><button className="btn-ghost p-2" onClick={() => generate([p.data.employeeId])}><RefreshCw size={16} /></button></Tooltip>
         </div>
@@ -106,6 +109,8 @@ export default function PayslipsPage() {
         rowSelection="multiple" rowMultiSelectWithClick
         onSelectionChanged={(e) => setSelected(e.api.getSelectedRows())}
       />
+
+      <SalarySlipPreview open={Boolean(preview)} slip={preview} onClose={() => setPreview(null)} />
     </div>
   );
 }

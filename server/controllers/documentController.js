@@ -17,11 +17,12 @@ const isFileId = (id) => /^[0-9a-fA-F-]{36}$/.test(id);
  */
 export const uploadUserDocument = asyncHandler(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'No document uploaded (field "document")');
-  const { documentType, documentNumber } = req.body;
+  const { documentType, documentName, documentNumber } = req.body;
 
   const fileId = path.basename(req.file.filename, '.pdf');
   const docRef = {
     documentType,
+    documentName,
     documentNumber,
     fileUrl: documentRelPath(fileId),
     uploadedAt: new Date(),

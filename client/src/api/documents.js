@@ -7,10 +7,11 @@ export const verifyDocument = (fileId, status) =>
 export const deleteDocument = (fileId) => api.delete(`/documents/file/${fileId}`).then((r) => r.data);
 export const documentFileUrl = (fileId) => `/api/documents/file/${fileId}`;
 
-export const uploadDocument = ({ file, documentType, documentNumber }) => {
+export const uploadDocument = ({ file, documentType, documentName, documentNumber }) => {
   const fd = new FormData();
   fd.append('document', file);
   fd.append('documentType', documentType);
+  fd.append('documentName', documentName || '');
   fd.append('documentNumber', documentNumber);
   return api.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
 };

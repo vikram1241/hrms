@@ -26,10 +26,14 @@ export default function EmployeeHub() {
 
       {/* Identity card */}
       <Card className="mb-6 overflow-hidden">
-        <div className="h-20 bg-gradient-to-r from-primary-600 to-primary-800" />
-        <CardBody className="-mt-12 flex flex-col items-start gap-4 sm:flex-row sm:items-end">
-          <Avatar src={profile.avatarUrl} name={profile.fullName} size={88} className="ring-4 ring-white" />
-          <div className="flex-1">
+        <div className="h-24 bg-gradient-to-r from-primary-600 to-primary-800" />
+        <CardBody className="pt-0">
+          {/* Avatar overlaps the band; name + details sit on white below it */}
+          <div className="flex items-start justify-between">
+            <Avatar src={profile.avatarUrl} name={profile.fullName} size={88} className="-mt-12 ring-4 ring-white" />
+            <Link to="/profile" className="btn-secondary mt-3"><UserCog size={16} /> Edit Profile</Link>
+          </div>
+          <div className="mt-3">
             <h2 className="text-xl font-bold text-ink">{profile.fullName}</h2>
             <p className="text-sm text-muted">{profile.designation || '—'} · {profile.department || '—'}</p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -38,7 +42,6 @@ export default function EmployeeHub() {
               {profile.reportingManager && <span className="text-xs text-muted">Reports to <span className="font-medium text-ink">{profile.reportingManager}</span></span>}
             </div>
           </div>
-          <Link to="/profile" className="btn-secondary"><UserCog size={16} /> Edit Profile</Link>
         </CardBody>
       </Card>
 

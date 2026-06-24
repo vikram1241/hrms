@@ -227,9 +227,11 @@ curl -b jar.txt localhost:5000/api/users?limit=5
 
 ## Notes & assumptions
 
-- **Email** is a console/in-memory stub (`services/emailService.js`) — swap the
-  transport for Nodemailer/SES in production. In non-production the API returns
-  magic-link / setup tokens in responses for convenience.
+- **Email**: real SMTP sending via Nodemailer when `SMTP_USER` + `SMTP_PASS` are
+  set in `.env`; otherwise it falls back to a console/in-memory stub. For Gmail,
+  `SMTP_PASS` must be a 16-char **App Password** (Google Account → Security →
+  2-Step Verification → App passwords), not your login password. In non-production
+  the API also returns magic-link / setup tokens in responses for convenience.
 - **Candidates** are backed by an inactive `User` (lifecycle "Draft") created at
   offer time with placeholder profile fields, completed during onboarding.
 - `multer` is pinned to 2.x (1.x has open advisories).

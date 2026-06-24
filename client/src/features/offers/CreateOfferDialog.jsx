@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import InputAdornment from '@mui/material/InputAdornment';
 import FormDialog from '../../components/ui/FormDialog.jsx';
+import CurrencyField from '../../components/ui/CurrencyField.jsx';
 import { createOffer } from '../../api/offers.js';
 import { listTemplates } from '../../api/salary.js';
 import { DEPARTMENTS } from '../../config/constants.js';
@@ -57,8 +57,7 @@ export default function CreateOfferDialog({ open, onClose, onSaved }) {
         <TextField label="Salary Template" value={form.templateId} onChange={set('templateId')} select fullWidth required>
           {templates.map((t) => <MenuItem key={t._id} value={t._id}>{t.name}</MenuItem>)}
         </TextField>
-        <TextField label="Annual CTC" type="number" value={form.annualCTC} onChange={set('annualCTC')} fullWidth required
-          slotProps={{ input: { startAdornment: <InputAdornment position="start">₹</InputAdornment> } }} />
+        <CurrencyField value={form.annualCTC} onChange={(v) => setForm({ ...form, annualCTC: v })} required />
       </div>
     </FormDialog>
   );

@@ -18,7 +18,9 @@ const FamilyMemberSchema = new mongoose.Schema({
 }, { _id: false });
 
 const DocumentReferenceSchema = new mongoose.Schema({
-  documentType: { type: String, required: true, enum: ['Aadhar', 'PAN', 'Passport', 'VoterID', 'DegreeCertificate', 'RelievingLetter', 'Payslip'] },
+  documentType: { type: String, required: true, enum: ['Aadhar', 'PAN', 'Passport', 'VoterID', 'DegreeCertificate', 'EducationCertificate', 'RelievingLetter', 'Payslip'] },
+  // User-provided label for the document (e.g. "B.Tech Degree Certificate").
+  documentName: { type: String, trim: true },
   documentNumber: { type: String, required: true, trim: true },
   fileUrl: { type: String, required: true },
   uploadedAt: { type: Date, default: Date.now },

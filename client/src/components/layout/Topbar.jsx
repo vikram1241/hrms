@@ -27,17 +27,15 @@ export default function Topbar({ user, onMenuClick, onLogout }) {
       </button>
 
       {/* Global search */}
-      <div className="relative hidden max-w-md flex-1 sm:block">
+      <div className="relative hidden w-full max-w-md sm:block">
         <Search size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input className="input pl-10" placeholder="Search everything…" />
       </div>
 
-      <div className="flex-1 sm:hidden" />
-
-      {/* Profile chip */}
+      {/* Profile chip — pinned to the right edge */}
       <button
         onClick={(e) => setAnchor(e.currentTarget)}
-        className="flex items-center gap-2.5 rounded-full py-1 pl-1 pr-2.5 transition hover:bg-slate-100"
+        className="ml-auto flex items-center gap-2.5 rounded-full py-1 pl-1 pr-2.5 transition hover:bg-slate-100"
       >
         <Avatar src={avatarUrl} name={name} size={36} />
         <span className="hidden text-left sm:block">
