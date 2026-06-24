@@ -8,7 +8,7 @@ import SalaryStructureTemplate from '../models/SalaryStructureTemplate.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { computeBreakdown } from '../utils/salaryEngine.js';
-import { rupeesToPaisa } from '../utils/money.js';
+import { rupeesToPaisa, formatINR } from '../utils/money.js';
 import { generateToken } from '../utils/tokens.js';
 import { generateOfferLetterPdf } from '../services/pdfService.js';
 import { upsertCandidateUser } from '../services/candidateService.js';
@@ -147,6 +147,54 @@ export const bulkCreateOffers = asyncHandler(async (req, res) => {
     message: `Processed roster: ${results.created.length} created, ${results.failed.length} failed`,
     ...results
   });
+});
+
+// Present a frozen breakdown with formatted display strings.
+const presentBreakdown = (assignment) => {
+  if (!assignment?.frozenMonthlyBreakdown) return null;
+  const b = assignment.frozenMonthlyBreakdown;
+  const disp = (items) => items.map((i) => ({ key: i.key, label: i.label, monthlyAmount: i.monthlyAmount, display: formatINR(i.monthlyAmount) }));
+  return {
+    annualCTC: assignment.annualCTC,
+    annualCTCDisplay: formatINR(assignment.annualCTC),
+    earnings: disp(b.earnings),
+    deductions: disp(b.deductions),
+    grossEarnings: b.grossEarnings,
+    grossEarningsDisplay: formatINR(b.grossEarnings),
+    totalDeductions: b.totalDeductions,
+    totalDeductionsDisplay: formatINR(b.totalDeductions),
+    netTakeHome: b.netTakeHome,
+    netTakeHomeDisplay: formatINR(b.netTakeHome)
+  };
+};
+
+/**
+ * GET /api/offers/mine
+ * The authenticated user's own (latest) offer letter + compensation breakdown.
+ */
+export const getMyOffer = asyncHandler(async (req, res) => {
+  const offer = await OfferLetter.findOne({ candidateEmail: req.user.email })
+    .sort({ offerDate: -1, createdAt: -1 })
+    .select('-accessTokenHash -digitalSignature.signatureBase64')
+    .populate({ path: 'salaryAssignmentId' });
+  if (!offer) throw new ApiError(404, 'No offer letter is associated with your account');
+
+  const { salaryAssignmentId, ...rest } = offer.toObject();
+  res.status(200).json({ success: true, offer: rest, compensation: presentBreakdown(salaryAssignmentId) });
+});
+
+/** GET /api/offers/mine/pdf — stream the caller's own (signed, if available) offer PDF. */
+export const downloadMyOfferPdf = asyncHandler(async (req, res) => {
+  const offer = await OfferLetter.findOne({ candidateEmail: req.user.email }).sort({ offerDate: -1, createdAt: -1 });
+  if (!offer) throw new ApiError(404, 'No offer letter found');
+
+  const rel = offer.signedPdfFileUrl || offer.pdfFileUrl;
+  const abs = path.resolve(process.cwd(), rel);
+  if (!fs.existsSync(abs)) throw new ApiError(404, 'Offer PDF is missing on disk');
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="offer-${offer._id}.pdf"`);
+  fs.createReadStream(abs).pipe(res);
 });
 
 /** GET /api/offers?status=&page=&limit= — US 3.3 management matrix. */

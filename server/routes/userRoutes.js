@@ -4,7 +4,9 @@ import {
   getUserById,
   updateUser,
   softDeleteUser,
-  restoreUser
+  restoreUser,
+  generateCredentials,
+  sendPasswordResetLink
 } from '../controllers/userController.js';
 import { verifyToken, authorizeRoles } from '../middleware/authMiddleware.js';
 import { updateUserRules } from '../validators/userValidators.js';
@@ -20,5 +22,7 @@ router.get('/:id', getUserById);
 router.put('/:id', updateUserRules, validate, updateUser);
 router.delete('/:id', softDeleteUser);
 router.post('/:id/restore', restoreUser);
+router.post('/:id/credentials', generateCredentials);
+router.post('/:id/reset-link', sendPasswordResetLink);
 
 export default router;

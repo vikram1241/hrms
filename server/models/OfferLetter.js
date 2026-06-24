@@ -9,6 +9,7 @@ const OfferLetterSchema = new mongoose.Schema({
   joiningDate: { type: Date, required: true },
   salaryAssignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmployeeSalaryAssignment', required: true },
   status: { type: String, enum: ['sent', 'pending', 'accepted', 'declined'], default: 'sent', index: true },
+  acceptedAt: { type: Date, default: null },
 
   pdfFileUrl: { type: String, required: true },
   signedPdfFileUrl: { type: String, default: null },

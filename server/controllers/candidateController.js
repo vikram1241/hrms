@@ -3,13 +3,11 @@ import OfferLetter from '../models/OfferLetter.js';
 import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { hashToken, generateToken } from '../utils/tokens.js';
+import { hashToken } from '../utils/tokens.js';
 import { bakeSignatureOnOffer } from '../services/pdfService.js';
-import { sendPasswordSetup } from '../services/emailService.js';
+import { provisionEmployee } from '../services/provisioningService.js';
 import { formatINR } from '../utils/money.js';
 
-const PASSWORD_SETUP_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-const clientOrigin = () => process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const exposeToken = () => process.env.NODE_ENV !== 'production';
 
 /** Look up a live (non-expired) offer by its raw magic-link token. */
@@ -68,7 +66,9 @@ export const getOfferByToken = asyncHandler(async (req, res) => {
  * POST /api/candidate/offer/:token/sign
  * US 5.3 — accept the offer by submitting a drawn signature (base64 PNG).
  * Bakes the signature into the PDF, records a cryptographic verification hash,
- * flips the offer to "accepted", and emails a password-setup link (US 5.4).
+ * flips the offer to "accepted" (with acceptedAt), then provisions the backing
+ * candidate into an active employee — assigning an employee ID and emailing
+ * login credentials (US 5.4).
  * Body: { signatureBase64 }
  */
 export const signOffer = asyncHandler(async (req, res) => {
@@ -90,32 +90,20 @@ export const signOffer = asyncHandler(async (req, res) => {
   });
 
   offer.status = 'accepted';
+  offer.acceptedAt = signedAt;
   offer.signedPdfFileUrl = signedPdfFileUrl;
-  offer.digitalSignature = {
-    signatureBase64,
-    signedAt,
-    ipAddress: req.ip,
-    verificationToken
-  };
+  offer.digitalSignature = { signatureBase64, signedAt, ipAddress: req.ip, verificationToken };
   // Burn the access token so the magic link cannot be replayed.
   offer.accessTokenHash = null;
   offer.accessTokenExpires = null;
   await offer.save();
 
-  // US 5.4 — issue a credential-setup link to the backing candidate user.
-  let setupUrl = null;
-  let rawSetup = null;
+  // Provision the candidate into an active employee and email credentials.
+  let provisioning = null;
   const userId = offer.salaryAssignmentId?.userId;
   if (userId) {
     const user = await User.findById(userId);
-    if (user) {
-      const { raw, hash } = generateToken();
-      rawSetup = raw;
-      user.passwordSetup = { tokenHash: hash, expiresAt: new Date(Date.now() + PASSWORD_SETUP_TTL_MS) };
-      await user.save();
-      setupUrl = `${clientOrigin()}/setup-password/${raw}`;
-      await sendPasswordSetup({ to: user.email, fullName: offer.fullName, setupUrl });
-    }
+    if (user) provisioning = await provisionEmployee(user, { offer });
   }
 
   res.status(200).json({
@@ -123,7 +111,9 @@ export const signOffer = asyncHandler(async (req, res) => {
     message: 'Offer accepted and signed',
     signedPdfFileUrl,
     verificationToken,
-    ...(exposeToken() ? { passwordSetupToken: rawSetup, setupUrl } : {})
+    employeeId: provisioning?.employeeId || null,
+    credentialsEmailedTo: offer.candidateEmail,
+    ...(exposeToken() && provisioning ? { tempPassword: provisioning.tempPassword } : {})
   });
 });
 

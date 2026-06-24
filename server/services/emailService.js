@@ -96,6 +96,23 @@ export const sendPasswordSetup = ({ to, fullName, setupUrl }) =>
     meta: { type: 'password_setup', setupUrl }
   });
 
+/** Login credentials issued after offer acceptance / by an admin. */
+export const sendCredentials = ({ to, fullName, employeeId, email, tempPassword, loginUrl }) =>
+  sendEmail({
+    to,
+    subject: 'Your XYZ employee account is ready',
+    body: `Hi ${fullName}, your account is active. Employee ID: ${employeeId}. Login: ${email} / ${tempPassword} at ${loginUrl}. Please change your password after first login.`,
+    html: wrapHtml(`<p>Hi <strong>${fullName}</strong>,</p>
+      <p>Your employee account is now active. Use the credentials below to sign in, then change your password from your profile.</p>
+      <table style="border-collapse:collapse;margin:16px 0">
+        <tr><td style="padding:4px 12px;color:#64748B">Employee ID</td><td style="padding:4px 12px;font-weight:600">${employeeId}</td></tr>
+        <tr><td style="padding:4px 12px;color:#64748B">Email</td><td style="padding:4px 12px;font-weight:600">${email}</td></tr>
+        <tr><td style="padding:4px 12px;color:#64748B">Temporary password</td><td style="padding:4px 12px;font-weight:600">${tempPassword}</td></tr>
+      </table>
+      <p style="margin:24px 0"><a href="${loginUrl}" style="background:#0D9488;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Sign in</a></p>`),
+    meta: { type: 'credentials', employeeId }
+  });
+
 /** Payslip notification (US 4.2 / 7). */
 export const sendPayslipNotice = ({ to, fullName, period }) =>
   sendEmail({

@@ -1,7 +1,15 @@
 import mongoose from 'mongoose';
 import User from '../models/User.js';
+import OfferLetter from '../models/OfferLetter.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { provisionEmployee } from '../services/provisioningService.js';
+import { generateToken } from '../utils/tokens.js';
+import { sendPasswordSetup } from '../services/emailService.js';
+
+const SETUP_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+const clientOrigin = () => process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const displayName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email;
 
 const toPublicUser = (user) => {
   const obj = user.toObject ? user.toObject() : user;
@@ -113,6 +121,53 @@ export const softDeleteUser = asyncHandler(async (req, res) => {
   await user.save();
 
   res.status(200).json({ success: true, message: 'User soft-deleted' });
+});
+
+/**
+ * POST /api/users/:id/credentials
+ * Admin/HR-triggered provisioning: ensure an employee ID + active status and
+ * (re)generate a temporary password, emailing the credentials to the user.
+ * Enriches designation/department/joining from their latest offer if present.
+ */
+export const generateCredentials = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid user id');
+  const user = await User.findById(req.params.id);
+  if (!user || user.deletedAt) throw new ApiError(404, 'User not found');
+
+  const offer = await OfferLetter.findOne({ candidateEmail: user.email }).sort({ createdAt: -1 });
+  const result = await provisionEmployee(user, { offer: offer || undefined });
+
+  res.status(200).json({
+    success: true,
+    message: `Login credentials emailed to ${user.email}`,
+    employeeId: result.employeeId,
+    ...(process.env.NODE_ENV !== 'production' ? { tempPassword: result.tempPassword } : {})
+  });
+});
+
+/**
+ * POST /api/users/:id/reset-link
+ * Admin/HR-triggered password reset: mints a single-use setup token and emails
+ * the user a link to set a new password (consumed by POST /candidate/setup-password).
+ * Useful when a user forgets their password.
+ */
+export const sendPasswordResetLink = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid user id');
+  const user = await User.findById(req.params.id);
+  if (!user || user.deletedAt) throw new ApiError(404, 'User not found');
+
+  const { raw, hash } = generateToken();
+  user.passwordSetup = { tokenHash: hash, expiresAt: new Date(Date.now() + SETUP_TTL_MS) };
+  await user.save();
+
+  const setupUrl = `${clientOrigin()}/setup-password/${raw}`;
+  await sendPasswordSetup({ to: user.email, fullName: displayName(user), setupUrl });
+
+  res.status(200).json({
+    success: true,
+    message: `Password reset link emailed to ${user.email}`,
+    ...(process.env.NODE_ENV !== 'production' ? { setupUrl } : {})
+  });
 });
 
 /** POST /api/users/:id/restore — undo a soft-delete. */

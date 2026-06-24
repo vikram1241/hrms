@@ -40,14 +40,14 @@ export default function SetupPasswordPage() {
         {done ? (
           <div className="text-center">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-success"><CheckCircle2 size={30} /></div>
-            <h2 className="text-lg font-bold text-ink">Account ready!</h2>
+            <h2 className="text-lg font-bold text-ink">Password set!</h2>
             <p className="mt-1 text-sm text-muted">Redirecting you to sign in…</p>
             <Link to="/login" className="btn-primary mt-5 w-full">Go to login</Link>
           </div>
         ) : (
           <>
-            <h2 className="text-xl font-bold text-ink">Set up your account</h2>
-            <p className="mt-1 text-sm text-muted">Choose a password to activate your employee account.</p>
+            <h2 className="text-xl font-bold text-ink">Set your password</h2>
+            <p className="mt-1 text-sm text-muted">Choose a new password for your employee account.</p>
             {error && <div className="mt-4 rounded-lg border border-danger/20 bg-danger-soft px-4 py-3 text-sm font-medium text-danger">{error}</div>}
             <form onSubmit={submit} className="mt-6 space-y-4">
               <Input id="password" type="password" label="New Password" icon={Lock} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} hint="Min 8 chars, with a letter and a number" required />

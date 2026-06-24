@@ -6,7 +6,9 @@ import {
   getOffer,
   updateOfferStatus,
   downloadOfferPdf,
-  resendOffer
+  resendOffer,
+  getMyOffer,
+  downloadMyOfferPdf
 } from '../controllers/offerController.js';
 import { verifyToken, authorizeRoles } from '../middleware/authMiddleware.js';
 import { uploadXlsx } from '../middleware/uploadXlsx.js';
@@ -15,9 +17,17 @@ import validate from '../middleware/validate.js';
 
 const router = Router();
 
-// All offer-management routes are admin/HR only. (Candidate-facing offer
-// access is unauthenticated via magic link — see candidateRoutes.)
-router.use(verifyToken, authorizeRoles(['admin', 'hr']));
+// All offer routes require authentication.
+router.use(verifyToken);
+
+// Employee self-service — own offer only. Declared before the admin gate and
+// before the '/:id' routes so the literal '/mine' path matches first.
+router.get('/mine', getMyOffer);
+router.get('/mine/pdf', downloadMyOfferPdf);
+
+// Everything below is admin/HR only. (Candidate-facing offer access is
+// unauthenticated via magic link — see candidateRoutes.)
+router.use(authorizeRoles(['admin', 'hr']));
 
 router.post('/', createOfferRules, validate, createOffer);
 router.post('/bulk', uploadXlsx, bulkCreateOffers);

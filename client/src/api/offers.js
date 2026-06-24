@@ -7,6 +7,10 @@ export const updateOfferStatus = (id, status) => api.patch(`/offers/${id}/status
 export const resendOffer = (id) => api.post(`/offers/${id}/resend`).then((r) => r.data);
 export const offerPdfUrl = (id) => `/api/offers/${id}/pdf`;
 
+// Employee self-service
+export const getMyOffer = () => api.get('/offers/mine').then((r) => r.data);
+export const myOfferPdfUrl = () => '/api/offers/mine/pdf';
+
 export const bulkUploadOffers = (file) => {
   const fd = new FormData();
   fd.append('roster', file);
