@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: hrms-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: hrms
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - hrms-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: hrms-server
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      MONGO_URI: mongodb://admin:admin123@mongodb:27017/hrms?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_key_change_in_production}
+      JWT_EXPIRE: ${JWT_EXPIRE:-7d}
+      REFRESH_TOKEN_EXPIRY: ${REFRESH_TOKEN_EXPIRY:-30d}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@hrms.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      FROM_EMAIL: ${FROM_EMAIL:-noreply@hrms.com}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./server/uploads:/app/uploads
+      - ./server/logs:/app/logs
+    networks:
+      - hrms-network
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: hrms-client
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - hrms-network
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+
+networks:
+  hrms-network:
+    driver: bridge

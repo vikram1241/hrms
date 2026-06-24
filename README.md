@@ -39,12 +39,27 @@ Open **two terminals** — one for the server, one for the client.
 
 ### 1. Backend (`/server`)
 
+#### Local Development
+
 ```bash
 cd server
 npm install
 cp .env.example .env        # then set JWT_SECRET and MONGO_URI
 npm run db:seed             # load demo data for every module (destructive)
 npm run dev                 # http://localhost:5000
+```
+
+#### With Docker
+
+```bash
+# From project root
+docker-compose up -d --build
+
+# Seed database with initial data
+docker-compose exec server npm run db:seed
+
+# Or seed only admin user
+docker-compose exec server npm run db:seed:admin
 ```
 
 `npm run db:seed` prints login credentials and live candidate offer links. Defaults:
@@ -71,6 +86,8 @@ so no extra CORS/env config is needed for local development. Open
 
 ## Common commands
 
+### Local Development
+
 | Location | Command | What it does |
 |---|---|---|
 | `server` | `npm run dev` | Start API with auto-reload (nodemon) |
@@ -81,6 +98,22 @@ so no extra CORS/env config is needed for local development. Open
 | `client` | `npm run dev` | Start the SPA dev server |
 | `client` | `npm run build` | Production build to `client/dist` |
 | `client` | `npm run preview` | Preview the production build |
+
+### Docker Commands
+
+| Command | What it does |
+|---|---|
+| `docker-compose up -d --build` | Start all services (client, server, MongoDB) |
+| `docker-compose down` | Stop all services |
+| `docker-compose down -v` | Stop and remove all data volumes |
+| `docker-compose exec server npm run db:seed` | Seed MongoDB with full demo dataset |
+| `docker-compose exec server npm run db:seed:admin` | Seed only admin user |
+| `docker-compose exec server npm test` | Run backend tests |
+| `docker-compose logs -f server` | View server logs |
+| `docker-compose logs -f client` | View client logs |
+| `docker-compose logs -f mongodb` | View MongoDB logs |
+
+**Quick Reference**: Use `./docker-commands.sh [command]` for common operations. Run `./docker-commands.sh` for full list.
 
 ---
 
