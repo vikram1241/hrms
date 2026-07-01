@@ -1,8 +1,19 @@
 # XYZ HRMS — Enterprise MERN Human Resource Management System
 
-A full-stack HRMS covering the complete employee lifecycle: authentication,
-user directory, offer letters with native e-signatures, compensation modelling,
-automated payslips, multi-stage onboarding, and a secure document vault.
+A **multi-tenant** full-stack HRMS covering the complete employee lifecycle:
+authentication with **permission-based RBAC** (superadmin / admin / HR / employee),
+a user directory with a section-wise **Employee 360** view, offer letters with
+native e-signatures and an HR approval gate, compensation modelling with a
+**statutory payroll engine** (PF/ESI/PT/TDS), automated payslips, multi-stage
+onboarding (incl. education & previous experience), attendance & leave, holidays,
+performance reviews / incentives / appraisals, a training video library, an asset
+register, employee exit/offboarding with generated relieving & experience letters,
+company-issued sealed documents (appointment letter / NDA / handbook / code of
+conduct), uploadable documents with read-accept / write-fill-PDF modes (e.g.
+Form 16), per-company branding & configuration, and a secure document vault.
+
+Every company's data is isolated by a tenant `companyId` enforced centrally in
+the data layer.
 
 - **Frontend** (`/client`) — React 19 + Vite, Tailwind CSS + Material UI (hybrid), AG Grid, Redux Toolkit, React Router v6
 - **Backend** (`/server`) — Node.js, Express (REST, MVC), MongoDB + Mongoose, JWT (HTTP-only cookie), Multer, pdf-lib, ExcelJS
@@ -62,13 +73,26 @@ docker-compose exec server npm run db:seed
 docker-compose exec server npm run db:seed:admin
 ```
 
-`npm run db:seed` prints login credentials and live candidate offer links. Defaults:
+`npm run db:seed` drops the database, loads a full demo company (`xyz`) across
+**every** module, and prints the credentials + a live candidate offer link.
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@xyz.com` | `Admin@123` |
-| HR | `priya.hr@xyz.com` | `Password1` |
-| Employee | `rahul.kumar@xyz.com` | `Password1` |
+> **Multi-tenant login:** the app is multi-tenant, so sign-in requires a
+> **Company code** (the tenant slug) in addition to email + password. The demo
+> company's code is **`xyz`**; the platform superadmin uses **`_platform`**.
+
+| Role | Company code | Email | Password |
+|---|---|---|---|
+| Admin | `xyz` | `admin@xyz.com` | `Admin@123` |
+| HR | `xyz` | `priya.hr@xyz.com` | `Password1` |
+| Employee | `xyz` | `rahul.kumar@xyz.com` | `Password1` |
+| Superadmin (manages tenants) | `_platform` | `super@platform.local` | `ChangeMe!123` |
+
+Additional seeded employees (company `xyz`, password `Password1`):
+`amit.patel@xyz.com`, `neha.gupta@xyz.com`, `sunny.deol@xyz.com`.
+
+> `npm run db:seed:admin` is the lighter bootstrap — it seeds only the platform
+> superadmin and one company admin (company code `xyz`, `admin@xyz.com` /
+> `ChangeMe!123`) without the demo dataset.
 
 ### 2. Frontend (`/client`)
 
@@ -135,18 +159,31 @@ See [`server/README.md`](server/README.md) for the full API reference and archit
 
 ## Portals at a glance
 
-- **Admin / HR** — dashboard with live metrics, user directory (AG Grid + filters),
-  offer letters (single + bulk XLSX, e-sign tracking), salary templates, payslip
-  generation, and document verifications.
+- **Superadmin** (platform) — provision and manage companies (tenants).
+- **Admin / HR** — dashboard, user directory + **Employee 360** detail view,
+  offer letters (single + bulk XLSX, e-sign + approval), salary templates &
+  statutory payroll, document verifications, **attendance & leave** approvals +
+  holidays, **performance** (reviews/incentives/appraisals/training), **training
+  library** uploads, **asset register**, **exits/offboarding**, a **documents
+  center** (issue sealed docs + manage uploadable types), and **company settings**
+  (branding, statutory numbers, stamp & signature — admin only).
+  RBAC: HR does day-to-day work but cannot delete users, change roles, or edit
+  company config.
 - **Candidate** (public magic link) — review offer + compensation breakdown,
-  draw a signature to accept, then set up account credentials.
-- **Employee** — self-service hub, multi-step onboarding wizard, document vault,
-  and payslip history with PDF downloads.
+  draw a signature to accept; after HR approval, login credentials are emailed.
+- **Employee** — self-service hub, onboarding wizard, document vault, payslips,
+  **attendance & leave**, **my documents** (acknowledge/sign/fill), **training**
+  (watch videos + mark complete), **performance**, and **my assets**.
 
 ## Notes
 
 - Money is stored as **integer paisa** to avoid floating-point drift.
 - Avatars are served statically; PAN/Aadhar documents, payslips and offer PDFs are
   streamed only through authorized routes (never by raw path).
-- Email is a console/in-memory stub (`server/services/emailService.js`); in
-  non-production, magic-link/setup tokens are returned in API responses for testing.
+- Email is a console/in-memory stub (`server/services/emailService.js`) unless
+  `SMTP_USER`/`SMTP_PASS` are set; in non-production, magic-link tokens and the
+  temporary password (issued after an HR approves a signed offer) are returned in
+  API responses for testing.
+- Multi-tenancy is enforced by a Mongoose `tenantScope` plugin + an
+  `AsyncLocalStorage` request context; run `node scripts/migrate-to-multitenant.js`
+  to backfill any pre-tenant data into a default company.
