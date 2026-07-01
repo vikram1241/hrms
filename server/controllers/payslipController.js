@@ -3,11 +3,13 @@ import fs from 'node:fs';
 import mongoose from 'mongoose';
 import SalarySlip from '../models/SalarySlip.js';
 import EmployeeSalaryAssignment from '../models/EmployeeSalaryAssignment.js';
+import Attendance from '../models/Attendance.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import { generatePayslipPdf } from '../services/pdfService.js';
 import { sendPayslipNotice } from '../services/emailService.js';
+import { computeStatutoryDeductions } from '../utils/statutoryEngine.js';
 
 const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -20,9 +22,29 @@ const ledgerFrom = (items) => items.map((i) => ({ label: i.label, amount: i.mont
  * Build (or refresh) one employee's payslip for a period from their frozen
  * salary breakdown, render the PDF, and persist. Idempotent per (employee, month, year).
  */
-const buildSlip = async (assignment, month, year, notify) => {
+const buildSlip = async (assignment, month, year, notify, { applyStatutory = false, workingDays = 30 } = {}) => {
   const user = assignment.userId; // populated
   const b = assignment.frozenMonthlyBreakdown;
+
+  let deductionsLedger = ledgerFrom(b.deductions);
+  let totalDeductions = b.totalDeductions;
+  let netPay = b.netTakeHome;
+
+  // Epic 16 — statutory run: recompute deductions (PF/ESI/PT/TDS) from earnings
+  // plus attendance-based LOP, replacing the template's static deductions.
+  if (applyStatutory) {
+    const basic = (b.earnings.find((e) => /basic/i.test(e.key || e.label))?.monthlyAmount) || 0;
+    const absentDays = await Attendance.countDocuments({
+      userId: user._id, status: 'Absent',
+      date: { $gte: new Date(Date.UTC(year, month - 1, 1)), $lt: new Date(Date.UTC(year, month, 1)) }
+    });
+    const { deductions } = computeStatutoryDeductions({
+      basicPaisa: basic, grossPaisa: b.grossEarnings, absentDays, workingDays
+    });
+    deductionsLedger = deductions;
+    totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
+    netPay = b.grossEarnings - totalDeductions;
+  }
 
   const slipData = {
     employeeId: user._id,
@@ -38,12 +60,12 @@ const buildSlip = async (assignment, month, year, notify) => {
       bankAccountHidden: maskAccount(user.employeeDetails?.bankDetails?.accountNumber)
     },
     earningsLedger: ledgerFrom(b.earnings),
-    deductionsLedger: ledgerFrom(b.deductions),
+    deductionsLedger,
     financialSummary: {
       grossEarnings: b.grossEarnings,
-      totalDeductions: b.totalDeductions,
-      netPay: b.netTakeHome,
-      netPayInWords: paisaToWords(b.netTakeHome)
+      totalDeductions,
+      netPay,
+      netPayInWords: paisaToWords(netPay)
     },
     paymentStatus: 'Paid'
   };
@@ -73,7 +95,7 @@ const buildSlip = async (assignment, month, year, notify) => {
  * Body: { month, year, employeeIds?: string[], notify?: boolean }
  */
 export const generatePayslips = asyncHandler(async (req, res) => {
-  const { month, year, employeeIds, notify = false } = req.body;
+  const { month, year, employeeIds, notify = false, applyStatutory = false, workingDays = 30 } = req.body;
 
   const filter = {};
   if (Array.isArray(employeeIds) && employeeIds.length) {
@@ -85,7 +107,7 @@ export const generatePayslips = asyncHandler(async (req, res) => {
   for (const assignment of assignments) {
     if (!assignment.userId) continue; // orphaned assignment
     try {
-      const slip = await buildSlip(assignment, month, year, notify);
+      const slip = await buildSlip(assignment, month, year, notify, { applyStatutory, workingDays });
       results.generated.push({ employeeId: assignment.userId._id, slipId: slip._id });
     } catch (err) {
       results.failed.push({ employeeId: assignment.userId._id, error: err.message });

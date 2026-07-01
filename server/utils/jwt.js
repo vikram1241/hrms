@@ -14,7 +14,7 @@ const getSecret = () => {
  */
 export const signToken = (user) =>
   jwt.sign(
-    { sub: user._id.toString(), role: user.role, email: user.email },
+    { sub: user._id.toString(), role: user.role, email: user.email, companyId: user.companyId?.toString() },
     getSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '1d' }
   );

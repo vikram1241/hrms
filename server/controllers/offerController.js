@@ -5,6 +5,7 @@ import ExcelJS from 'exceljs';
 import OfferLetter from '../models/OfferLetter.js';
 import EmployeeSalaryAssignment from '../models/EmployeeSalaryAssignment.js';
 import SalaryStructureTemplate from '../models/SalaryStructureTemplate.js';
+import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { computeBreakdown } from '../utils/salaryEngine.js';
@@ -12,6 +13,7 @@ import { rupeesToPaisa, formatINR } from '../utils/money.js';
 import { generateToken } from '../utils/tokens.js';
 import { generateOfferLetterPdf } from '../services/pdfService.js';
 import { upsertCandidateUser } from '../services/candidateService.js';
+import { provisionEmployee } from '../services/provisioningService.js';
 import { sendOfferInvite } from '../services/emailService.js';
 
 const ACCESS_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -236,6 +238,50 @@ export const updateOfferStatus = asyncHandler(async (req, res) => {
   offer.status = req.body.status;
   await offer.save();
   res.status(200).json({ success: true, message: `Offer marked ${offer.status}`, offer });
+});
+
+/**
+ * POST /api/offers/:id/approve — US 5.4 approval gate.
+ * HR/Admin approves a candidate-signed offer. Only valid once the candidate has
+ * e-signed (status 'signed'). On approval the offer is flipped to 'accepted' and
+ * the backing candidate is provisioned into an active employee — assigning an
+ * employee ID and emailing login credentials.
+ */
+export const approveOffer = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid offer id');
+  const offer = await OfferLetter.findById(req.params.id).populate({ path: 'salaryAssignmentId' });
+  if (!offer) throw new ApiError(404, 'Offer not found');
+
+  if (offer.status === 'accepted') throw new ApiError(400, 'Offer already approved');
+  if (offer.status === 'declined') throw new ApiError(400, 'Cannot approve a declined offer');
+  if (offer.status !== 'signed') throw new ApiError(400, 'Offer has not been signed by the candidate yet');
+
+  const now = new Date();
+  offer.status = 'accepted';
+  offer.acceptedAt = now;
+  offer.approvedAt = now;
+  offer.approvedBy = req.user._id;
+  // Consume the magic link now that the offer is fully approved.
+  offer.accessTokenHash = null;
+  offer.accessTokenExpires = null;
+  await offer.save();
+
+  // Provision the candidate into an active employee and email credentials.
+  let provisioning = null;
+  const userId = offer.salaryAssignmentId?.userId;
+  if (userId) {
+    const user = await User.findById(userId);
+    if (user) provisioning = await provisionEmployee(user, { offer });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: `Offer approved — login credentials emailed to ${offer.candidateEmail}`,
+    offer,
+    employeeId: provisioning?.employeeId || null,
+    credentialsEmailedTo: offer.candidateEmail,
+    ...(exposeToken() && provisioning ? { tempPassword: provisioning.tempPassword } : {})
+  });
 });
 
 /** GET /api/offers/:id/pdf — stream the (signed, if available) offer PDF. */

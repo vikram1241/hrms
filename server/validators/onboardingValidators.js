@@ -1,4 +1,5 @@
 import { body } from 'express-validator';
+import { DOCUMENT_TYPES } from '../models/User.js';
 
 export const personalRules = [
   body('firstName').optional().isString().trim().notEmpty(),
@@ -40,11 +41,26 @@ export const bankRules = [
 ];
 
 export const documentUploadRules = [
-  body('documentType').isIn(['Aadhar', 'PAN', 'Passport', 'VoterID', 'DegreeCertificate', 'EducationCertificate', 'RelievingLetter', 'Payslip']).withMessage('Invalid document type'),
+  body('documentType').isIn(DOCUMENT_TYPES).withMessage('Invalid document type'),
   body('documentName').optional().isString().trim(),
   body('documentNumber').isString().trim().notEmpty().withMessage('Document reference number is required')
 ];
 
 export const verifyDocumentRules = [
   body('status').isIn(['Pending', 'Verified', 'Rejected']).withMessage('Invalid verification status')
+];
+
+// Epic 9 — structured education / experience / references.
+export const educationRules = [
+  body('educationHistory').isArray().withMessage('educationHistory must be an array'),
+  body('educationHistory.*.level').isIn(['SSC', 'HSC', 'Diploma', 'Graduate', 'PostGraduate', 'Doctorate', 'Professional', 'Other']).withMessage('Invalid education level'),
+  body('educationHistory.*.institution').isString().trim().notEmpty().withMessage('Institution is required'),
+  body('educationHistory.*.yearOfPassing').optional().isInt({ min: 1950, max: 2100 }).withMessage('Invalid year of passing')
+];
+
+export const experienceRules = [
+  body('experienceHistory').optional().isArray().withMessage('experienceHistory must be an array'),
+  body('experienceHistory.*.employerName').isString().trim().notEmpty().withMessage('Employer name is required'),
+  body('references').optional().isArray().withMessage('references must be an array'),
+  body('references.*.name').optional().isString().trim().notEmpty().withMessage('Reference name is required')
 ];

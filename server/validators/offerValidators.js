@@ -14,5 +14,5 @@ export const createOfferRules = [
 ];
 
 export const offerStatusRules = [
-  body('status').isIn(['sent', 'pending', 'accepted', 'declined']).withMessage('Invalid status')
+  body('status').isIn(['sent', 'pending', 'signed', 'accepted', 'declined']).withMessage('Invalid status')
 ];

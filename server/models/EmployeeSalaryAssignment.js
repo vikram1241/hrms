@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import tenantScope from './plugins/tenantScope.js';
 
 const FinancialBreakdownItemSchema = new mongoose.Schema({
   key: { type: String, required: true },
@@ -8,6 +9,7 @@ const FinancialBreakdownItemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const EmployeeSalaryAssignmentSchema = new mongoose.Schema({
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'SalaryStructureTemplate', required: true },
   // Annual CTC in paisa (integer).
@@ -21,5 +23,7 @@ const EmployeeSalaryAssignmentSchema = new mongoose.Schema({
     netTakeHome: { type: Number, required: true }
   }
 }, { timestamps: true });
+
+EmployeeSalaryAssignmentSchema.plugin(tenantScope);
 
 export default mongoose.model('EmployeeSalaryAssignment', EmployeeSalaryAssignmentSchema);

@@ -18,7 +18,8 @@ test('dashboard stats are admin/HR only', async () => {
 });
 
 test('dashboard stats aggregate employees, pending offers and pending verifications', async () => {
-  const { agent } = await authAgent(app, { email: 'admin@xyz.com', role: 'admin' });
+  const { agent, company } = await authAgent(app, { email: 'admin@xyz.com', role: 'admin' });
+  const cid = company._id;
 
   await createUser({ email: 'e1@xyz.com', role: 'employee' });
   await createUser({
@@ -27,14 +28,14 @@ test('dashboard stats aggregate employees, pending offers and pending verificati
   });
 
   // A pending offer needs a salary assignment to satisfy the schema.
-  const tpl = await SalaryStructureTemplate.create({ name: 'T', earningsStructure: [], deductionsStructure: [] });
+  const tpl = await SalaryStructureTemplate.create({ companyId: cid, name: 'T', earningsStructure: [], deductionsStructure: [] });
   const u = await createUser({ email: 'cand@xyz.com', role: 'employee', isActive: false });
   const asn = await EmployeeSalaryAssignment.create({
-    userId: u._id, templateId: tpl._id, annualCTC: 1200000,
+    companyId: cid, userId: u._id, templateId: tpl._id, annualCTC: 1200000,
     frozenMonthlyBreakdown: { earnings: [], deductions: [], grossEarnings: 0, totalDeductions: 0, netTakeHome: 0 }
   });
   await OfferLetter.create({
-    candidateEmail: 'cand@xyz.com', fullName: 'Cand', position: 'Dev', department: 'Engineering',
+    companyId: cid, candidateEmail: 'cand@xyz.com', fullName: 'Cand', position: 'Dev', department: 'Engineering',
     joiningDate: new Date(), salaryAssignmentId: asn._id, status: 'sent', pdfFileUrl: 'uploads/offers/o.pdf'
   });
 

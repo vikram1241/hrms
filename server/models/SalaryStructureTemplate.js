@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import tenantScope from './plugins/tenantScope.js';
 
 const FormulaFieldSchema = new mongoose.Schema({
   key: { type: String, required: true, lowercase: true, trim: true },
@@ -16,11 +17,17 @@ const FormulaFieldSchema = new mongoose.Schema({
 }, { _id: false });
 
 const SalaryStructureTemplateSchema = new mongoose.Schema({
-  name: { type: String, required: true, unique: true, trim: true },
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+  name: { type: String, required: true, trim: true },
   description: { type: String, trim: true },
   earningsStructure: [FormulaFieldSchema],
   deductionsStructure: [FormulaFieldSchema],
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
+
+// Template name is unique within a company (Epic T).
+SalaryStructureTemplateSchema.index({ companyId: 1, name: 1 }, { unique: true });
+
+SalaryStructureTemplateSchema.plugin(tenantScope);
 
 export default mongoose.model('SalaryStructureTemplate', SalaryStructureTemplateSchema);

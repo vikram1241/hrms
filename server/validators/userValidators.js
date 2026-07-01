@@ -10,5 +10,12 @@ export const updateUserRules = [
   body('isActive').optional().isBoolean().withMessage('isActive must be boolean').toBoolean(),
   body('designation').optional().isString().trim(),
   body('department').optional().isIn(DEPARTMENTS).withMessage('Invalid department'),
-  body('employeeId').optional().isString().trim().notEmpty().withMessage('Employee ID cannot be empty')
+  body('employeeId').optional().isString().trim().notEmpty().withMessage('Employee ID cannot be empty'),
+  // Epic 8 employment + statutory fields.
+  body('employmentType').optional().isIn(['Full-Time', 'Part-Time', 'Permanent', 'Probation', 'Contract', 'Intern']).withMessage('Invalid employment type'),
+  body('workLocation').optional().isString().trim(),
+  body('reportingManagerId').optional().isMongoId().withMessage('Invalid reporting manager id'),
+  body('dateOfJoining').optional().isISO8601().withMessage('dateOfJoining must be a valid date'),
+  body('esiNumber').optional().isString().trim(),
+  body('professionalTaxNumber').optional().isString().trim()
 ];

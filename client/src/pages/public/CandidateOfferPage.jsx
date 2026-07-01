@@ -53,17 +53,11 @@ export default function CandidateOfferPage() {
       <Branded>
         <div className="mx-auto max-w-md rounded-xl border border-line bg-white p-8 text-center shadow-card animate-fade-in">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-success-soft text-success"><CheckCircle2 size={36} /></div>
-          <h2 className="text-xl font-bold text-ink">Offer Accepted!</h2>
-          <p className="mt-2 text-sm text-muted">Congratulations and welcome aboard. Your signed contract has been recorded and your employee account is now active.</p>
-          {result.employeeId && (
-            <p className="mt-4 rounded-lg bg-primary-50 p-3 text-sm text-primary-800">
-              Your Employee ID is <strong>{result.employeeId}</strong>. We've emailed your login credentials to <strong>{result.credentialsEmailedTo}</strong>.
-            </p>
-          )}
-          {result.tempPassword && (
-            <p className="mt-2 rounded-lg bg-warning-soft p-2 text-xs text-warning">Dev: temp password <strong>{result.tempPassword}</strong></p>
-          )}
-          <Link to="/login" className="btn-primary mt-6 w-full">Go to login</Link>
+          <h2 className="text-xl font-bold text-ink">Offer Signed!</h2>
+          <p className="mt-2 text-sm text-muted">Thank you — your signed contract has been recorded and is now awaiting HR approval.</p>
+          <p className="mt-4 rounded-lg bg-primary-50 p-3 text-sm text-primary-800">
+            Once HR approves your offer, we'll email your login credentials to <strong>{data?.offer?.candidateEmail}</strong> so you can access the employee portal.
+          </p>
         </div>
       </Branded>
     );

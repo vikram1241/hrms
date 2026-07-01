@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Pagination from '@mui/material/Pagination';
@@ -8,7 +9,7 @@ import Checkbox from '@mui/material/Checkbox';
 import Tooltip from '@mui/material/Tooltip';
 import Menu from '@mui/material/Menu';
 import ListItemIcon from '@mui/material/ListItemIcon';
-import { Search, Pencil, Trash2, Wallet, RotateCcw, KeyRound, MoreVertical, Link2 } from 'lucide-react';
+import { Search, Pencil, Trash2, Wallet, RotateCcw, KeyRound, MoreVertical, Link2, Eye } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card } from '../../components/ui/Card.jsx';
 import DataGrid from '../../components/ui/DataGrid.jsx';
@@ -25,7 +26,7 @@ const RoleChip = ({ value }) => <span className="badge-neutral capitalize">{valu
 
 // Per-row action cluster: direct icons for common actions + an overflow menu
 // for account/credential actions. Manages its own menu anchor state.
-function RowActions({ row, onEdit, onAssign, onDelete, onCreds, onReset, onRestore }) {
+function RowActions({ row, onView, onEdit, onAssign, onDelete, onCreds, onReset, onRestore }) {
   const [anchor, setAnchor] = useState(null);
   if (row.deletedAt) {
     return (
@@ -37,6 +38,7 @@ function RowActions({ row, onEdit, onAssign, onDelete, onCreds, onReset, onResto
   const pick = (fn) => () => { setAnchor(null); fn(row); };
   return (
     <div className="flex h-full items-center gap-1">
+      <Tooltip title="View full details"><button className="btn-ghost p-2 text-primary-600" onClick={() => onView(row)}><Eye size={16} /></button></Tooltip>
       <Tooltip title="Edit"><button className="btn-ghost p-2" onClick={() => onEdit(row)}><Pencil size={16} /></button></Tooltip>
       <Tooltip title="Assign salary"><button className="btn-ghost p-2 text-primary-600" onClick={() => onAssign(row)}><Wallet size={16} /></button></Tooltip>
       <Tooltip title="Delete"><button className="btn-ghost p-2 text-danger" onClick={() => onDelete(row)}><Trash2 size={16} /></button></Tooltip>
@@ -68,6 +70,7 @@ const StatusCell = ({ data }) => {
 
 export default function UsersPage() {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const [filters, setFilters] = useState({ search: '', role: '', status: '', department: '', includeDeleted: false });
   const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
@@ -167,6 +170,7 @@ export default function UsersPage() {
       cellRenderer: (p) => (
         <RowActions
           row={p.data}
+          onView={(row) => navigate(`/users/${row._id}`)}
           onEdit={setEditUser} onAssign={setAssignUser} onDelete={setDeleteTarget}
           onCreds={setCredsTarget} onReset={setResetTarget} onRestore={onRestore}
         />

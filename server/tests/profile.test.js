@@ -50,11 +50,11 @@ test('change password: weak new password -> 400', async () => {
 });
 
 test('change password succeeds and new password works for login', async () => {
-  const { agent, user } = await authAgent(app);
+  const { agent, user, company } = await authAgent(app);
   const change = await agent.patch('/api/profile/password').send({ currentPassword: 'Password1', newPassword: 'NewPass123' });
   assert.equal(change.status, 200);
 
-  const relog = await request(app).post('/api/auth/login').send({ email: user.email, password: 'NewPass123' });
+  const relog = await request(app).post('/api/auth/login').send({ companySlug: company.slug, email: user.email, password: 'NewPass123' });
   assert.equal(relog.status, 200);
 });
 

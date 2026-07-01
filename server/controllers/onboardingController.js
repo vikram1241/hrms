@@ -77,6 +77,42 @@ export const saveContact = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, message: 'Contact details saved', stage: user.onboardingStage, contactInfo: user.contactInfo });
 });
 
+/**
+ * PATCH /api/onboarding/education — Epic 9.
+ * Replaces the caller's structured education history (SSC/12th/degree/PG/…).
+ * Independent of the linear wizard stage machine.
+ */
+export const saveEducation = asyncHandler(async (req, res) => {
+  const user = await loadSelf(req);
+  if (!Array.isArray(req.body.educationHistory)) throw new ApiError(400, 'educationHistory must be an array');
+  user.educationHistory = req.body.educationHistory;
+  await user.save();
+  res.status(200).json({ success: true, message: 'Education details saved', educationHistory: user.educationHistory });
+});
+
+/**
+ * PATCH /api/onboarding/experience — Epic 9.
+ * Replaces previous-employment history and professional references.
+ */
+export const saveExperience = asyncHandler(async (req, res) => {
+  const user = await loadSelf(req);
+  if (req.body.experienceHistory !== undefined) {
+    if (!Array.isArray(req.body.experienceHistory)) throw new ApiError(400, 'experienceHistory must be an array');
+    user.experienceHistory = req.body.experienceHistory;
+  }
+  if (req.body.references !== undefined) {
+    if (!Array.isArray(req.body.references)) throw new ApiError(400, 'references must be an array');
+    user.references = req.body.references;
+  }
+  await user.save();
+  res.status(200).json({
+    success: true,
+    message: 'Experience & references saved',
+    experienceHistory: user.experienceHistory,
+    references: user.references
+  });
+});
+
 /** PATCH /api/onboarding/bank — wizard step 4 (final). */
 export const saveBank = asyncHandler(async (req, res) => {
   const user = await loadSelf(req);
@@ -86,10 +122,13 @@ export const saveBank = asyncHandler(async (req, res) => {
     accountHolderName: b.accountHolderName,
     accountNumber: b.accountNumber,
     bankName: b.bankName,
-    ifscCode: b.ifscCode
+    ifscCode: b.ifscCode,
+    upiId: b.upiId // Epic 8 (optional)
   };
   if (b.panNumber !== undefined) user.employeeDetails.panNumber = b.panNumber;
   if (b.uanNumber !== undefined) user.employeeDetails.uanNumber = b.uanNumber;
+  if (b.esiNumber !== undefined) user.employeeDetails.esiNumber = b.esiNumber; // Epic 8
+  if (b.professionalTaxNumber !== undefined) user.employeeDetails.professionalTaxNumber = b.professionalTaxNumber; // Epic 8
   advanceStage(user, 'bank');
   await user.save();
   res.status(200).json({ success: true, message: 'Bank details saved', stage: user.onboardingStage, bankDetails: user.employeeDetails.bankDetails });

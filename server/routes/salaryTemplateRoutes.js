@@ -6,12 +6,13 @@ import {
   updateTemplate,
   deactivateTemplate
 } from '../controllers/salaryTemplateController.js';
-import { verifyToken, authorizeRoles } from '../middleware/authMiddleware.js';
+import { verifyToken, requirePermission } from '../middleware/authMiddleware.js';
+import { PERMISSIONS } from '../config/permissions.js';
 import { createTemplateRules, updateTemplateRules } from '../validators/salaryValidators.js';
 import validate from '../middleware/validate.js';
 
 const router = Router();
-router.use(verifyToken, authorizeRoles(['admin', 'hr']));
+router.use(verifyToken, requirePermission(PERMISSIONS.TEMPLATE_MANAGE));
 
 router.post('/', createTemplateRules, validate, createTemplate);
 router.get('/', listTemplates);

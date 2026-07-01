@@ -21,9 +21,9 @@ const TEMPLATE = {
 };
 
 const setup = async () => {
-  const { agent } = await authAgent(app, { email: 'hr@xyz.com', role: 'hr' });
-  const tpl = await SalaryStructureTemplate.create(TEMPLATE);
-  return { agent, tpl };
+  const { agent, company } = await authAgent(app, { email: 'hr@xyz.com', role: 'hr' });
+  const tpl = await SalaryStructureTemplate.create({ ...TEMPLATE, companyId: company._id });
+  return { agent, tpl, company };
 };
 
 test('create a single offer: stages candidate, freezes salary, emails magic link', async () => {
@@ -74,8 +74,8 @@ test('list, view PDF, status transition, and resend', async () => {
 });
 
 test('bulk XLSX ingestion creates good rows and reports bad rows by index', async () => {
-  const { agent } = await setup();
-  await SalaryStructureTemplate.create({ ...TEMPLATE, name: 'Sales-Std' });
+  const { agent, company } = await setup();
+  await SalaryStructureTemplate.create({ ...TEMPLATE, name: 'Sales-Std', companyId: company._id });
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('roster');

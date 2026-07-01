@@ -5,14 +5,14 @@ import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import Pagination from '@mui/material/Pagination';
 import Tooltip from '@mui/material/Tooltip';
-import { Search, Plus, FileSpreadsheet, Eye, Send } from 'lucide-react';
+import { Search, Plus, FileSpreadsheet, Eye, Send, CheckCircle2 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import DataGrid from '../../components/ui/DataGrid.jsx';
 import CreateOfferDialog from './CreateOfferDialog.jsx';
 import BulkUploadDialog from './BulkUploadDialog.jsx';
-import { listOffers, updateOfferStatus, resendOffer, offerPdfUrl } from '../../api/offers.js';
+import { listOffers, updateOfferStatus, approveOffer, resendOffer, offerPdfUrl } from '../../api/offers.js';
 import { OFFER_STATUSES } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
@@ -66,7 +66,17 @@ export default function OffersPage() {
     }
   };
 
-  const STATUS_COLOR = { sent: '#D97706', pending: '#0EA5E9', accepted: '#16A34A', declined: '#DC2626' };
+  const approve = async (offer) => {
+    try {
+      const res = await approveOffer(offer._id);
+      dispatch(notifySuccess(res.message || 'Offer approved — credentials emailed.'));
+      fetchOffers();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage));
+    }
+  };
+
+  const STATUS_COLOR = { sent: '#D97706', pending: '#0EA5E9', signed: '#7C3AED', accepted: '#16A34A', declined: '#DC2626' };
 
   const columnDefs = useMemo(() => [
     { headerName: 'Candidate', field: 'fullName', minWidth: 170, flex: 1.5 },
@@ -86,11 +96,12 @@ export default function OffersPage() {
       )
     },
     {
-      headerName: 'Actions', filter: false, sortable: false, maxWidth: 130,
+      headerName: 'Actions', filter: false, sortable: false, maxWidth: 160,
       cellRenderer: (p) => (
         <div className="flex h-full items-center gap-1">
           <Tooltip title="View PDF"><a className="btn-ghost p-2 text-primary-600" href={offerPdfUrl(p.data._id)} target="_blank" rel="noreferrer"><Eye size={16} /></a></Tooltip>
-          {p.data.status !== 'accepted' && <Tooltip title="Resend"><button className="btn-ghost p-2" onClick={() => resend(p.data)}><Send size={16} /></button></Tooltip>}
+          {p.data.status === 'signed' && <Tooltip title="Approve & issue credentials"><button className="btn-ghost p-2 text-success" onClick={() => approve(p.data)}><CheckCircle2 size={16} /></button></Tooltip>}
+          {p.data.status !== 'accepted' && p.data.status !== 'signed' && <Tooltip title="Resend"><button className="btn-ghost p-2" onClick={() => resend(p.data)}><Send size={16} /></button></Tooltip>}
         </div>
       )
     }

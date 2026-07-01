@@ -7,7 +7,8 @@ import {
   verifyDocument,
   deleteDocument
 } from '../controllers/documentController.js';
-import { verifyToken, authorizeRoles } from '../middleware/authMiddleware.js';
+import { verifyToken, requirePermission } from '../middleware/authMiddleware.js';
+import { PERMISSIONS } from '../config/permissions.js';
 import { uploadDocument } from '../middleware/uploadDocument.js';
 import { documentUploadRules, verifyDocumentRules } from '../validators/onboardingValidators.js';
 import validate from '../middleware/validate.js';
@@ -24,8 +25,8 @@ router.get('/', listMyDocuments);
 router.get('/file/:fileId', streamDocument);
 router.delete('/file/:fileId', deleteDocument);
 
-// HR / admin review.
-router.get('/user/:userId', authorizeRoles(['admin', 'hr']), listUserDocuments);
-router.patch('/file/:fileId/verify', authorizeRoles(['admin', 'hr']), verifyDocumentRules, validate, verifyDocument);
+// HR / admin review — granular RBAC (Epic R).
+router.get('/user/:userId', requirePermission(PERMISSIONS.DOCUMENT_READ_ANY), listUserDocuments);
+router.patch('/file/:fileId/verify', requirePermission(PERMISSIONS.DOCUMENT_VERIFY), verifyDocumentRules, validate, verifyDocument);
 
 export default router;

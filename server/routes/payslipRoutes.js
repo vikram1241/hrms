@@ -5,7 +5,8 @@ import {
   listMyPayslips,
   downloadPayslipPdf
 } from '../controllers/payslipController.js';
-import { verifyToken, authorizeRoles } from '../middleware/authMiddleware.js';
+import { verifyToken, requirePermission } from '../middleware/authMiddleware.js';
+import { PERMISSIONS } from '../config/permissions.js';
 import { generatePayslipRules } from '../validators/salaryValidators.js';
 import validate from '../middleware/validate.js';
 
@@ -18,8 +19,8 @@ router.get('/mine', listMyPayslips);
 // Authorized download — ownership/role enforced inside the controller.
 router.get('/:id/pdf', downloadPayslipPdf);
 
-// Admin / HR management.
-router.post('/generate', authorizeRoles(['admin', 'hr']), generatePayslipRules, validate, generatePayslips);
-router.get('/', authorizeRoles(['admin', 'hr']), listPayslips);
+// Management — granular RBAC (Epic R).
+router.post('/generate', requirePermission(PERMISSIONS.PAYROLL_RUN), generatePayslipRules, validate, generatePayslips);
+router.get('/', requirePermission(PERMISSIONS.PAYROLL_READ), listPayslips);
 
 export default router;

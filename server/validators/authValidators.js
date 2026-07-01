@@ -1,6 +1,9 @@
 import { body } from 'express-validator';
 
 export const loginRules = [
+  body('companySlug')
+    .isString().withMessage('Company code is required')
+    .trim().notEmpty().withMessage('Company code is required'),
   body('email')
     .isEmail().withMessage('A valid email is required')
     .normalizeEmail({ gmail_remove_dots: false }),

@@ -16,7 +16,7 @@ export const DOC_TYPE_LABEL = {
   EducationCertificate: 'Education Certificate', DegreeCertificate: 'Education Certificate',
   RelievingLetter: 'Relieving Letter', Payslip: 'Payslip'
 };
-export const OFFER_STATUSES = ['sent', 'pending', 'accepted', 'declined'];
+export const OFFER_STATUSES = ['sent', 'pending', 'signed', 'accepted', 'declined'];
 export const CALC_TYPES = [
   { value: 'fixed', label: 'Fixed amount (₹)' },
   { value: 'percentage_of_ctc', label: '% of CTC' },

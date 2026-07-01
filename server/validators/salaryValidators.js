@@ -35,5 +35,8 @@ export const generatePayslipRules = [
   body('month').isInt({ min: 1, max: 12 }).withMessage('month must be 1-12').toInt(),
   body('year').isInt({ min: 2000, max: 2100 }).withMessage('year is invalid').toInt(),
   body('employeeIds').optional().isArray().withMessage('employeeIds must be an array'),
-  body('notify').optional().isBoolean().toBoolean()
+  body('notify').optional().isBoolean().toBoolean(),
+  // Epic 16 — statutory run (PF/ESI/PT/TDS + LOP).
+  body('applyStatutory').optional().isBoolean().toBoolean(),
+  body('workingDays').optional().isInt({ min: 1, max: 31 }).toInt()
 ];

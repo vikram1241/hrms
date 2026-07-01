@@ -5,18 +5,23 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { hashToken } from '../utils/tokens.js';
 import { bakeSignatureOnOffer } from '../services/pdfService.js';
-import { provisionEmployee } from '../services/provisioningService.js';
 import { formatINR } from '../utils/money.js';
+import { setTenant } from '../utils/tenantContext.js';
 
-const exposeToken = () => process.env.NODE_ENV !== 'production';
-
-/** Look up a live (non-expired) offer by its raw magic-link token. */
+/**
+ * Look up a live (non-expired) offer by its raw magic-link token. The token
+ * itself is the security boundary for this unauthenticated route; once found,
+ * we pin the request's tenant context to the offer's company so every
+ * downstream query (populate, user lookup, provisioning) is properly scoped.
+ */
 const findOfferByToken = async (rawToken) => {
   const offer = await OfferLetter.findOne({
     accessTokenHash: hashToken(rawToken),
     accessTokenExpires: { $gt: new Date() }
-  }).populate({ path: 'salaryAssignmentId' });
+  });
   if (!offer) throw new ApiError(401, 'This offer link is invalid or has expired');
+  setTenant({ companyId: offer.companyId, role: 'employee' });
+  await offer.populate({ path: 'salaryAssignmentId' });
   return offer;
 };
 
@@ -64,17 +69,19 @@ export const getOfferByToken = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/candidate/offer/:token/sign
- * US 5.3 — accept the offer by submitting a drawn signature (base64 PNG).
+ * US 5.3 — e-sign the offer by submitting a drawn signature (base64 PNG).
  * Bakes the signature into the PDF, records a cryptographic verification hash,
- * flips the offer to "accepted" (with acceptedAt), then provisions the backing
- * candidate into an active employee — assigning an employee ID and emailing
- * login credentials (US 5.4).
+ * and moves the offer to "signed" — awaiting HR/Admin approval. Login
+ * credentials are NOT issued here; provisioning happens only after approval
+ * (see POST /api/offers/:id/approve, US 5.4).
  * Body: { signatureBase64 }
  */
 export const signOffer = asyncHandler(async (req, res) => {
   const { signatureBase64 } = req.body;
   const offer = await findOfferByToken(req.params.token);
 
+  // Signing is only valid on an outstanding offer; block replays / re-signs.
+  if (offer.status === 'signed') throw new ApiError(409, 'This offer has already been signed and is awaiting approval');
   if (offer.status === 'accepted') throw new ApiError(409, 'This offer has already been accepted');
   if (offer.status === 'declined') throw new ApiError(409, 'This offer was declined');
 
@@ -89,31 +96,18 @@ export const signOffer = asyncHandler(async (req, res) => {
     signedAt
   });
 
-  offer.status = 'accepted';
-  offer.acceptedAt = signedAt;
+  // Awaiting approval — credentials are withheld until HR/Admin approves.
+  offer.status = 'signed';
   offer.signedPdfFileUrl = signedPdfFileUrl;
   offer.digitalSignature = { signatureBase64, signedAt, ipAddress: req.ip, verificationToken };
-  // Burn the access token so the magic link cannot be replayed.
-  offer.accessTokenHash = null;
-  offer.accessTokenExpires = null;
   await offer.save();
-
-  // Provision the candidate into an active employee and email credentials.
-  let provisioning = null;
-  const userId = offer.salaryAssignmentId?.userId;
-  if (userId) {
-    const user = await User.findById(userId);
-    if (user) provisioning = await provisionEmployee(user, { offer });
-  }
 
   res.status(200).json({
     success: true,
-    message: 'Offer accepted and signed',
+    message: 'Offer signed — awaiting HR approval. You will receive your login credentials by email once approved.',
+    status: offer.status,
     signedPdfFileUrl,
-    verificationToken,
-    employeeId: provisioning?.employeeId || null,
-    credentialsEmailedTo: offer.candidateEmail,
-    ...(exposeToken() && provisioning ? { tempPassword: provisioning.tempPassword } : {})
+    verificationToken
   });
 });
 

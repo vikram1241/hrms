@@ -1,33 +1,41 @@
 import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ShieldCheck, Building2 } from 'lucide-react';
 import Button from '../components/ui/Button.jsx';
 import Input from '../components/ui/Input.jsx';
 import { login, selectAuth } from '../features/auth/authSlice.js';
+
+// Remember the last company code so returning users don't retype it.
+const LAST_SLUG_KEY = 'hrms_last_company';
 
 export default function Login() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { status, error } = useSelector(selectAuth);
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ companySlug: localStorage.getItem(LAST_SLUG_KEY) || '', email: '', password: '' });
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState({});
 
   if (status === 'authenticated') return <Navigate to="/" replace />;
 
+  const companyError = touched.companySlug && !form.companySlug.trim() ? 'Company code is required' : '';
   const emailError = touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '';
   const pwError = touched.password && !form.password ? 'Password is required' : '';
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    setTouched({ email: true, password: true });
-    if (!form.email || !form.password) return;
+    setTouched({ companySlug: true, email: true, password: true });
+    if (!form.companySlug.trim() || !form.email || !form.password) return;
     setSubmitting(true);
-    const res = await dispatch(login(form));
+    const payload = { ...form, companySlug: form.companySlug.trim().toLowerCase() };
+    const res = await dispatch(login(payload));
     setSubmitting(false);
-    if (login.fulfilled.match(res)) navigate('/', { replace: true });
+    if (login.fulfilled.match(res)) {
+      localStorage.setItem(LAST_SLUG_KEY, payload.companySlug);
+      navigate('/', { replace: true });
+    }
   };
 
   return (
@@ -70,11 +78,18 @@ export default function Login() {
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <Input
+              id="companySlug" type="text" label="Company code" placeholder="e.g. xyz" icon={Building2}
+              value={form.companySlug}
+              onChange={(e) => setForm({ ...form, companySlug: e.target.value })}
+              onBlur={() => setTouched((t) => ({ ...t, companySlug: true }))}
+              error={companyError} autoComplete="organization" autoFocus
+            />
+            <Input
               id="email" type="email" label="Work email" placeholder="you@xyz.com" icon={Mail}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               onBlur={() => setTouched((t) => ({ ...t, email: true }))}
-              error={emailError} autoComplete="email" autoFocus
+              error={emailError} autoComplete="email"
             />
             <div>
               <Input

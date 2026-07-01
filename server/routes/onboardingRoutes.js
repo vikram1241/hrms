@@ -4,10 +4,12 @@ import {
   savePersonal,
   saveFamily,
   saveContact,
-  saveBank
+  saveBank,
+  saveEducation,
+  saveExperience
 } from '../controllers/onboardingController.js';
 import { verifyToken, authorizeRoles } from '../middleware/authMiddleware.js';
-import { personalRules, familyRules, contactRules, bankRules } from '../validators/onboardingValidators.js';
+import { personalRules, familyRules, contactRules, bankRules, educationRules, experienceRules } from '../validators/onboardingValidators.js';
 import validate from '../middleware/validate.js';
 
 const router = Router();
@@ -20,5 +22,7 @@ router.patch('/personal', personalRules, validate, savePersonal);
 router.patch('/family', familyRules, validate, saveFamily);
 router.patch('/contact', contactRules, validate, saveContact);
 router.patch('/bank', bankRules, validate, saveBank);
+router.patch('/education', educationRules, validate, saveEducation);
+router.patch('/experience', experienceRules, validate, saveExperience);
 
 export default router;

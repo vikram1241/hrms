@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import tenantScope from './plugins/tenantScope.js';
 
 const PaySlipLineItemSchema = new mongoose.Schema({
   label: { type: String, required: true },
@@ -7,6 +8,7 @@ const PaySlipLineItemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const SalarySlipSchema = new mongoose.Schema({
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   month: { type: Number, required: true, min: 1, max: 12 },
   year: { type: Number, required: true, min: 2000 },
@@ -36,6 +38,8 @@ const SalarySlipSchema = new mongoose.Schema({
   paymentStatus: { type: String, enum: ['Paid', 'Processing', 'On-Hold'], default: 'Paid' }
 }, { timestamps: true });
 
-SalarySlipSchema.index({ employeeId: 1, month: 1, year: 1 }, { unique: true });
+SalarySlipSchema.index({ companyId: 1, employeeId: 1, month: 1, year: 1 }, { unique: true });
+
+SalarySlipSchema.plugin(tenantScope);
 
 export default mongoose.model('SalarySlip', SalarySlipSchema);

@@ -15,7 +15,17 @@ import onboardingRoutes from './routes/onboardingRoutes.js';
 import documentRoutes from './routes/documentRoutes.js';
 import selfServiceRoutes from './routes/selfServiceRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
+import tenantRoutes from './routes/tenantRoutes.js';
+import companyRoutes from './routes/companyRoutes.js';
+import employeeDocumentRoutes from './routes/employeeDocumentRoutes.js';
+import uploadedDocumentRoutes from './routes/uploadedDocumentRoutes.js';
+import attendanceRoutes from './routes/attendanceRoutes.js';
+import performanceRoutes from './routes/performanceRoutes.js';
+import trainingRoutes from './routes/trainingRoutes.js';
+import assetRoutes from './routes/assetRoutes.js';
+import exitRoutes from './routes/exitRoutes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
+import { tenantContextMiddleware } from './utils/tenantContext.js';
 
 const app = express();
 
@@ -29,11 +39,15 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Establish a per-request tenant context store (Epic T) before any route runs.
+app.use(tenantContextMiddleware);
+
 // Avatars are public assets; sensitive documents are NOT served from here.
 app.use('/uploads/avatars', express.static(path.resolve('uploads', 'avatars')));
 
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
 
+app.use('/api/tenants', tenantRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/users', userRoutes);
@@ -46,6 +60,15 @@ app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/self-service', selfServiceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/company', companyRoutes);
+app.use('/api/employee-docs', employeeDocumentRoutes);
+app.use('/api/uploaded-docs', uploadedDocumentRoutes);
+app.use('/api/performance', performanceRoutes);
+app.use('/api/training', trainingRoutes);
+app.use('/api/assets', assetRoutes);
+app.use('/api/exits', exitRoutes);
+// Attendance/leaves/holidays share one router with absolute subpaths.
+app.use('/api', attendanceRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -1,7 +1,9 @@
 import User from '../models/User.js';
+import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { signToken, cookieOptions, COOKIE_NAME } from '../utils/jwt.js';
+import { setTenant } from '../utils/tenantContext.js';
 
 /**
  * Strip sensitive/internal fields before returning a user to the client.
@@ -19,12 +21,20 @@ const toPublicUser = (user) => {
  * US 1.1: invalid credentials always return a generic 401 (no user enumeration).
  */
 export const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { companySlug, email, password } = req.body;
 
-  // Password is select:true in the schema, so it's available here.
-  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  const genericError = new ApiError(401, 'Invalid company code, email or password');
 
-  const genericError = new ApiError(401, 'Invalid email or password');
+  // Resolve the tenant first (company code). Missing slug fails generically to
+  // avoid revealing which companies exist.
+  if (!companySlug) throw genericError;
+  const company = await Company.findOne({ slug: String(companySlug).toLowerCase().trim() });
+  if (!company || company.status !== 'active') throw genericError;
+
+  // Scope this request to the resolved tenant so the user lookup is isolated.
+  setTenant({ companyId: company._id, role: null });
+
+  const user = await User.findOne({ companyId: company._id, email: email.toLowerCase().trim() });
   if (!user) throw genericError;
 
   const matches = await user.comparePassword(password);
@@ -61,5 +71,9 @@ export const logout = asyncHandler(async (req, res) => {
  * Returns the currently authenticated user (set by verifyToken).
  */
 export const getCurrentUser = asyncHandler(async (req, res) => {
-  res.status(200).json({ success: true, user: toPublicUser(req.user) });
+  // Company is the tenant root (not itself tenant-scoped) — plain lookup.
+  const company = req.user.companyId
+    ? await Company.findById(req.user.companyId).select('name slug branding status')
+    : null;
+  res.status(200).json({ success: true, user: toPublicUser(req.user), company });
 });
