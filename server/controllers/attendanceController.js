@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
+import ExcelJS from 'exceljs';
 import Attendance from '../models/Attendance.js';
 import LeaveRequest from '../models/LeaveRequest.js';
 import Holiday from '../models/Holiday.js';
+import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
@@ -58,6 +60,86 @@ export const markAttendance = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.body.userId)) throw new ApiError(400, 'Valid userId is required');
   const record = await upsertAttendance({ userId: req.body.userId, body: req.body, markedBy: req.user._id });
   res.status(200).json({ success: true, message: 'Attendance recorded', record });
+});
+
+/**
+ * POST /api/attendance/bulk — HR records the same-day status for many employees
+ * at once. Body: { userIds:[], date, status, checkIn?, checkOut? }
+ */
+export const markBulkAttendance = asyncHandler(async (req, res) => {
+  const { userIds, date, status, checkIn, checkOut } = req.body;
+  if (!Array.isArray(userIds) || !userIds.length) throw new ApiError(400, 'userIds must be a non-empty array');
+  const valid = userIds.filter((id) => mongoose.isValidObjectId(id));
+  if (!valid.length) throw new ApiError(400, 'No valid userIds provided');
+
+  let count = 0;
+  for (const userId of valid) {
+    // eslint-disable-next-line no-await-in-loop
+    await upsertAttendance({ userId, body: { date, status, checkIn, checkOut }, markedBy: req.user._id });
+    count += 1;
+  }
+  res.status(200).json({ success: true, message: `Attendance recorded for ${count} employee(s)`, count });
+});
+
+// Read a cell as a plain value (handles rich-text / hyperlink / formula cells).
+const cellVal = (row, idx) => {
+  if (!idx) return null;
+  const v = row.getCell(idx).value;
+  if (v && typeof v === 'object' && 'text' in v) return v.text;
+  if (v && typeof v === 'object' && 'result' in v) return v.result;
+  return v;
+};
+
+/**
+ * POST /api/attendance/bulk-upload — import attendance from an .xlsx roster.
+ * Header row (case-insensitive), one of employeeId/email required to identify:
+ *   employeeId | email | date | status | checkIn | checkOut
+ * Malformed rows are reported by index without aborting the batch.
+ */
+export const bulkUploadAttendance = asyncHandler(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'No file uploaded (field "roster")');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(req.file.buffer);
+  const sheet = wb.worksheets[0];
+  if (!sheet) throw new ApiError(400, 'The spreadsheet has no worksheets');
+
+  const col = {};
+  sheet.getRow(1).eachCell((c, idx) => { col[String(c.value).trim().toLowerCase()] = idx; });
+  if (!col.employeeid && !col.email) throw new ApiError(400, 'Sheet must have an "employeeId" or "email" column');
+  if (!col.date) throw new ApiError(400, 'Sheet must have a "date" column');
+
+  const results = { imported: [], failed: [] };
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const row = sheet.getRow(r);
+    const empId = col.employeeid ? cellVal(row, col.employeeid) : null;
+    const email = col.email ? cellVal(row, col.email) : null;
+    if (!empId && !email) continue; // blank row
+
+    try {
+      const query = empId
+        ? { 'employeeDetails.employeeId': String(empId).trim().toUpperCase() }
+        : { email: String(email).toLowerCase().trim() };
+      const user = await User.findOne(query).select('_id');
+      if (!user) throw new Error('Employee not found');
+
+      const date = cellVal(row, col.date);
+      await upsertAttendance({
+        userId: user._id,
+        body: {
+          date: date ? new Date(date) : new Date(),
+          status: (col.status && cellVal(row, col.status)) || 'Present',
+          checkIn: col.checkin ? cellVal(row, col.checkin) : undefined,
+          checkOut: col.checkout ? cellVal(row, col.checkout) : undefined
+        },
+        markedBy: req.user._id
+      });
+      results.imported.push({ row: r, employee: empId || email });
+    } catch (err) {
+      results.failed.push({ row: r, employee: empId || email, error: err.message });
+    }
+  }
+
+  res.status(201).json({ success: true, message: `Imported ${results.imported.length}, failed ${results.failed.length}`, ...results });
 });
 
 /** GET /api/attendance?userId&month&year — HR view. */

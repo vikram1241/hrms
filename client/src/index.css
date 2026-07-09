@@ -45,20 +45,20 @@
   .badge-neutral { @apply badge bg-slate-100 text-slate-600; }
 }
 
-/* ---- AG Grid (Quartz) themed to the teal palette ---- */
+/* ---- AG Grid (Quartz) themed to the orange + grey palette ---- */
 .ag-theme-quartz {
   --ag-font-family: 'Inter', system-ui, sans-serif;
   --ag-font-size: 13px;
-  --ag-foreground-color: #134E4A;
+  --ag-foreground-color: #1F2937;
   --ag-background-color: #ffffff;
-  --ag-header-background-color: #F0FDFA;
-  --ag-header-foreground-color: #0F766E;
-  --ag-border-color: #E2E8F0;
-  --ag-row-border-color: #EEF2F6;
-  --ag-row-hover-color: #F0FDFA;
-  --ag-selected-row-background-color: #CCFBF1;
-  --ag-accent-color: #0D9488;
-  --ag-input-focus-border-color: #0D9488;
+  --ag-header-background-color: #FFF7ED;
+  --ag-header-foreground-color: #C2410C;
+  --ag-border-color: #E5E7EB;
+  --ag-row-border-color: #F3F4F6;
+  --ag-row-hover-color: #FFF7ED;
+  --ag-selected-row-background-color: #FFEDD5;
+  --ag-accent-color: #EA580C;
+  --ag-input-focus-border-color: #EA580C;
   --ag-header-column-resize-handle-color: #CBD5E1;
   --ag-wrapper-border-radius: 12px;
   --ag-header-height: 46px;

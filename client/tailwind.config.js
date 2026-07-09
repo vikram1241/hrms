@@ -4,31 +4,31 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Teal + Emerald palette. `primary` drives buttons/links/active nav.
+        // Orange + Grey palette. `primary` (orange) drives buttons/links/active nav.
         primary: {
-          50: '#F0FDFA',
-          100: '#CCFBF1',
-          200: '#99F6E4',
-          300: '#5EEAD4',
-          400: '#2DD4BF',
-          500: '#14B8A6',
-          600: '#0D9488', // brand
-          700: '#0F766E',
-          800: '#115E59',
-          900: '#134E4A',
-          950: '#042F2E'
+          50: '#FFF7ED',
+          100: '#FFEDD5',
+          200: '#FED7AA',
+          300: '#FDBA74',
+          400: '#FB923C',
+          500: '#F97316',
+          600: '#EA580C', // brand
+          700: '#C2410C',
+          800: '#9A3412',
+          900: '#7C2D12',
+          950: '#431407'
         },
-        // Sidebar / deep surfaces.
+        // Sidebar / deep surfaces (charcoal grey).
         sidebar: {
-          DEFAULT: '#0F2E2B',
-          hover: '#15403B',
-          active: '#0D9488'
+          DEFAULT: '#1F2937',
+          hover: '#374151',
+          active: '#EA580C'
         },
-        ink: '#134E4A', // primary text
-        muted: '#64748B', // secondary text
-        surface: '#F4FBFA', // app background
+        ink: '#1F2937', // primary text (dark grey)
+        muted: '#6B7280', // secondary text (grey)
+        surface: '#F9FAFB', // app background (light grey)
         card: '#FFFFFF',
-        line: '#E2E8F0', // borders
+        line: '#E5E7EB', // borders (grey)
         success: { DEFAULT: '#16A34A', soft: '#DCFCE7' },
         warning: { DEFAULT: '#D97706', soft: '#FEF3C7' },
         danger: { DEFAULT: '#DC2626', soft: '#FEE2E2' },
@@ -38,8 +38,8 @@ export default {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif']
       },
       boxShadow: {
-        card: '0 1px 2px 0 rgba(15, 46, 43, 0.04), 0 1px 3px 0 rgba(15, 46, 43, 0.08)',
-        elevated: '0 10px 30px -10px rgba(15, 46, 43, 0.18)'
+        card: '0 1px 2px 0 rgba(31, 41, 55, 0.04), 0 1px 3px 0 rgba(31, 41, 55, 0.08)',
+        elevated: '0 10px 30px -10px rgba(31, 41, 55, 0.18)'
       },
       borderRadius: {
         xl: '0.875rem'

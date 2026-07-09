@@ -24,7 +24,7 @@ const SignaturePad = forwardRef(function SignaturePad({ height = 200, onChange }
       ctx.lineWidth = 2.2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#0F2E2B';
+      ctx.strokeStyle = '#1F2937';
     };
     resize();
     window.addEventListener('resize', resize);

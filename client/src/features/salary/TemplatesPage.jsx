@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useDispatch } from 'react-redux';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
 import { Plus, Pencil, Power, SlidersHorizontal } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
@@ -9,6 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import TemplateDialog from './TemplateDialog.jsx';
+import LetterTemplatesSection from './LetterTemplatesSection.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { listTemplates, deactivateTemplate } from '../../api/salary.js';
 import { CALC_TYPES } from '../../config/constants.js';
@@ -18,6 +21,7 @@ const typeLabel = (t) => CALC_TYPES.find((c) => c.value === t)?.label || t;
 
 export default function TemplatesPage() {
   const dispatch = useDispatch();
+  const [tab, setTab] = useState(0);
   const { data: templates, loading, reload } = useAsync(() => listTemplates(), []);
   const [dialog, setDialog] = useState({ open: false, template: null });
   const [deactivateTarget, setDeactivateTarget] = useState(null);
@@ -40,11 +44,16 @@ export default function TemplatesPage() {
   return (
     <div>
       <PageHeader
-        title="Setup Templates" subtitle="Reusable salary calculation models"
-        actions={<Button onClick={() => setDialog({ open: true, template: null })}><Plus size={16} /> New Salary Model</Button>}
+        title="Setup Templates" subtitle="Salary models and company letter templates"
+        actions={tab === 0 ? <Button onClick={() => setDialog({ open: true, template: null })}><Plus size={16} /> New Salary Model</Button> : null}
       />
 
-      {loading ? (
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Tab label="Salary Structures" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Letter Templates" sx={{ textTransform: 'none', fontWeight: 600 }} />
+      </Tabs>
+
+      {tab === 1 ? <LetterTemplatesSection /> : loading ? (
         <div className="flex justify-center py-20"><Spinner size={32} className="text-primary-600" /></div>
       ) : !templates?.length ? (
         <Card><EmptyState icon={SlidersHorizontal} title="No salary models yet" message="Create your first reusable salary structure to assign to employees." /></Card>

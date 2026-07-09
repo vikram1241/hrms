@@ -41,9 +41,9 @@ const initTransport = () => {
 const fromAddress = () => process.env.MAIL_FROM || `XYZ HRMS <${process.env.SMTP_USER || 'no-reply@xyz.local'}>`;
 
 const wrapHtml = (body) =>
-  `<div style="font-family:Inter,Arial,sans-serif;color:#134E4A;line-height:1.6">
-     <div style="background:#0D9488;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0;font-weight:700">XYZ Software Solutions</div>
-     <div style="border:1px solid #E2E8F0;border-top:0;padding:20px;border-radius:0 0 8px 8px">${body}</div>
+  `<div style="font-family:Inter,Arial,sans-serif;color:#1F2937;line-height:1.6">
+     <div style="background:#EA580C;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0;font-weight:700">XYZ Software Solutions</div>
+     <div style="border:1px solid #E5E7EB;border-top:0;padding:20px;border-radius:0 0 8px 8px">${body}</div>
    </div>`;
 
 /**
@@ -78,8 +78,8 @@ export const sendOfferInvite = ({ to, fullName, offerUrl }) =>
     body: `Hi ${fullName}, view and sign your offer here: ${offerUrl}`,
     html: wrapHtml(`<p>Hi <strong>${fullName}</strong>,</p>
       <p>We're delighted to extend you an offer. Review and sign it securely using the button below.</p>
-      <p style="margin:24px 0"><a href="${offerUrl}" style="background:#0D9488;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">View &amp; Sign Offer</a></p>
-      <p style="font-size:12px;color:#64748B">Or paste this link into your browser:<br/>${offerUrl}</p>`),
+      <p style="margin:24px 0"><a href="${offerUrl}" style="background:#EA580C;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">View &amp; Sign Offer</a></p>
+      <p style="font-size:12px;color:#6B7280">Or paste this link into your browser:<br/>${offerUrl}</p>`),
     meta: { type: 'offer_invite', offerUrl }
   });
 
@@ -91,8 +91,8 @@ export const sendPasswordSetup = ({ to, fullName, setupUrl }) =>
     body: `Welcome aboard ${fullName}! Set your password here: ${setupUrl}`,
     html: wrapHtml(`<p>Welcome aboard, <strong>${fullName}</strong>! 🎉</p>
       <p>Set up your account password to access the employee portal.</p>
-      <p style="margin:24px 0"><a href="${setupUrl}" style="background:#0D9488;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Set up my account</a></p>
-      <p style="font-size:12px;color:#64748B">${setupUrl}</p>`),
+      <p style="margin:24px 0"><a href="${setupUrl}" style="background:#EA580C;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Set up my account</a></p>
+      <p style="font-size:12px;color:#6B7280">${setupUrl}</p>`),
     meta: { type: 'password_setup', setupUrl }
   });
 
@@ -105,11 +105,11 @@ export const sendCredentials = ({ to, fullName, employeeId, email, tempPassword,
     html: wrapHtml(`<p>Hi <strong>${fullName}</strong>,</p>
       <p>Your employee account is now active. Use the credentials below to sign in, then change your password from your profile.</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:4px 12px;color:#64748B">Employee ID</td><td style="padding:4px 12px;font-weight:600">${employeeId}</td></tr>
-        <tr><td style="padding:4px 12px;color:#64748B">Email</td><td style="padding:4px 12px;font-weight:600">${email}</td></tr>
-        <tr><td style="padding:4px 12px;color:#64748B">Temporary password</td><td style="padding:4px 12px;font-weight:600">${tempPassword}</td></tr>
+        <tr><td style="padding:4px 12px;color:#6B7280">Employee ID</td><td style="padding:4px 12px;font-weight:600">${employeeId}</td></tr>
+        <tr><td style="padding:4px 12px;color:#6B7280">Email</td><td style="padding:4px 12px;font-weight:600">${email}</td></tr>
+        <tr><td style="padding:4px 12px;color:#6B7280">Temporary password</td><td style="padding:4px 12px;font-weight:600">${tempPassword}</td></tr>
       </table>
-      <p style="margin:24px 0"><a href="${loginUrl}" style="background:#0D9488;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Sign in</a></p>`),
+      <p style="margin:24px 0"><a href="${loginUrl}" style="background:#EA580C;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Sign in</a></p>`),
     meta: { type: 'credentials', employeeId }
   });
 

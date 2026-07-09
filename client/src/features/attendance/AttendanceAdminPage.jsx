@@ -2,14 +2,21 @@ import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { CalendarDays, Check, X, Plus, Trash2 } from 'lucide-react';
+import Select from '@mui/material/Select';
+import Checkbox from '@mui/material/Checkbox';
+import ListItemText from '@mui/material/ListItemText';
+import InputLabel from '@mui/material/InputLabel';
+import FormControl from '@mui/material/FormControl';
+import { CalendarDays, Check, X, Plus, Trash2, Users, Upload, Download } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { listLeaves, decideLeave, markAttendance, listHolidays, createHoliday, deleteHoliday } from '../../api/attendance.js';
+import { listUsers } from '../../api/users.js';
+import { fullName } from '../../config/constants.js';
+import { listLeaves, decideLeave, markAttendance, markBulkAttendance, bulkUploadAttendance, listHolidays, createHoliday, deleteHoliday } from '../../api/attendance.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -20,7 +27,11 @@ export default function AttendanceAdminPage() {
   const dispatch = useDispatch();
   const leaves = useAsync(() => listLeaves({ status: 'Pending' }), []);
   const holidays = useAsync(() => listHolidays({ year: new Date().getFullYear() }), []);
+  const { data: usersResp } = useAsync(() => listUsers({ limit: 100, role: 'employee' }), []);
+  const employees = usersResp?.data || [];
   const [att, setAtt] = useState({ userId: '', date: today(), status: 'Present' });
+  const [bulk, setBulk] = useState({ userIds: [], date: today(), status: 'Present' });
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [hol, setHol] = useState({ date: today(), name: '' });
 
   const decide = async (id, status) => {
@@ -31,6 +42,29 @@ export default function AttendanceAdminPage() {
     if (!att.userId) return dispatch(notifyError('Select an employee.'));
     try { await markAttendance(att); dispatch(notifySuccess('Attendance recorded.')); }
     catch (err) { dispatch(notifyError(err.uiMessage)); }
+  };
+  const saveBulk = async () => {
+    if (!bulk.userIds.length) return dispatch(notifyError('Select at least one employee.'));
+    setBulkBusy(true);
+    try {
+      const res = await markBulkAttendance(bulk);
+      dispatch(notifySuccess(res.message || 'Bulk attendance recorded.'));
+      setBulk({ ...bulk, userIds: [] });
+    } catch (err) { dispatch(notifyError(err.uiMessage)); }
+    finally { setBulkBusy(false); }
+  };
+  const allSelected = employees.length > 0 && bulk.userIds.length === employees.length;
+  const toggleAll = () => setBulk({ ...bulk, userIds: allSelected ? [] : employees.map((e) => e._id) });
+
+  const importXlsx = async (file) => {
+    if (!file) return;
+    setBulkBusy(true);
+    try {
+      const res = await bulkUploadAttendance(file);
+      dispatch(notifySuccess(res.message || 'Attendance imported.'));
+      if (res.failed?.length) dispatch(notifyError(`${res.failed.length} row(s) failed — check employee IDs.`));
+    } catch (err) { dispatch(notifyError(err.uiMessage)); }
+    finally { setBulkBusy(false); }
   };
   const saveHol = async () => {
     if (!hol.name) return dispatch(notifyError('Enter a holiday name.'));
@@ -80,6 +114,51 @@ export default function AttendanceAdminPage() {
           </div>
         </CardBody></Card>
 
+        <Card><CardBody>
+          <h3 className="mb-3 flex items-center gap-2 text-base font-semibold text-ink"><Users size={18} className="text-primary-600" /> Bulk attendance</h3>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <TextField type="date" size="small" label="Date" InputLabelProps={{ shrink: true }} value={bulk.date} onChange={(e) => setBulk({ ...bulk, date: e.target.value })} />
+              <TextField select size="small" label="Status" value={bulk.status} onChange={(e) => setBulk({ ...bulk, status: e.target.value })}>
+                {STATUSES.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              </TextField>
+            </div>
+            <FormControl fullWidth size="small">
+              <InputLabel id="bulk-emp-label">Employees</InputLabel>
+              <Select
+                labelId="bulk-emp-label" label="Employees" multiple value={bulk.userIds}
+                onChange={(e) => setBulk({ ...bulk, userIds: e.target.value })}
+                renderValue={(sel) => `${sel.length} selected`}
+              >
+                {employees.map((u) => (
+                  <MenuItem key={u._id} value={u._id}>
+                    <Checkbox size="small" checked={bulk.userIds.includes(u._id)} />
+                    <ListItemText primary={fullName(u)} secondary={u.employeeDetails?.employeeId} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <div className="flex items-center justify-between">
+              <button type="button" className="text-xs font-medium text-primary-600 hover:underline" onClick={toggleAll}>
+                {allSelected ? 'Clear selection' : 'Select all employees'}
+              </button>
+              <Button onClick={saveBulk} loading={bulkBusy}>Mark {bulk.userIds.length || ''} attendance</Button>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-line pt-3 text-xs">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 font-medium text-primary-600 hover:underline">
+                <Upload size={13} /> Import from Excel
+                <input type="file" accept=".xlsx,.xls" hidden onChange={(e) => { importXlsx(e.target.files?.[0]); e.target.value = ''; }} />
+              </label>
+              <a className="inline-flex items-center gap-1.5 text-muted hover:text-primary-600" href="/samples/bulk-attendance-sample.xlsx" download>
+                <Download size={13} /> Sample .xlsx
+              </a>
+            </div>
+          </div>
+        </CardBody></Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card><CardBody>
           <h3 className="mb-3 flex items-center gap-2 text-base font-semibold text-ink"><CalendarDays size={18} className="text-primary-600" /> Holiday calendar</h3>
           <div className="mb-3 flex items-end gap-2">

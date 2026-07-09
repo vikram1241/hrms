@@ -4,6 +4,12 @@ import api from '../lib/axios.js';
 export const markMyAttendance = (body) => api.post('/attendance/mark', body).then((r) => r.data.record);
 export const myAttendance = (params) => api.get('/attendance/mine', { params }).then((r) => r.data.data);
 export const markAttendance = (body) => api.post('/attendance', body).then((r) => r.data.record);
+export const markBulkAttendance = (body) => api.post('/attendance/bulk', body).then((r) => r.data);
+export const bulkUploadAttendance = (file) => {
+  const fd = new FormData();
+  fd.append('roster', file);
+  return api.post('/attendance/bulk-upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+};
 export const listAttendance = (params) => api.get('/attendance', { params }).then((r) => r.data.data);
 
 // Leave

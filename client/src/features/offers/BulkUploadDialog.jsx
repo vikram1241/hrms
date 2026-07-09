@@ -58,6 +58,11 @@ export default function BulkUploadDialog({ open, onClose, onDone }) {
               <p className="text-xs text-muted">.xlsx with columns: fullName, email, position, department, annualCTC, joiningDate, templateName</p>
               <input ref={inputRef} type="file" accept=".xlsx,.xls" hidden onChange={(e) => setFile(e.target.files?.[0] || null)} />
             </div>
+            <div className="mt-2 text-center">
+              <a href="/samples/bulk-offers-sample.xlsx" download onClick={(e) => e.stopPropagation()}
+                className="text-xs font-medium text-primary-600 hover:underline">Download sample .xlsx</a>
+              <span className="ml-1 text-xs text-muted">· templateName must match an existing salary template</span>
+            </div>
             {file && (
               <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
                 <FileSpreadsheet size={18} className="text-primary-600" /> {file.name}

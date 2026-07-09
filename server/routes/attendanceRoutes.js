@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import {
-  markMyAttendance, listMyAttendance, markAttendance, listAttendance,
+  markMyAttendance, listMyAttendance, markAttendance, markBulkAttendance, bulkUploadAttendance, listAttendance,
   applyLeave, listMyLeaves, listLeaves, decideLeave, cancelLeave,
   createHoliday, listHolidays, deleteHoliday
 } from '../controllers/attendanceController.js';
 import { verifyToken, requirePermission } from '../middleware/authMiddleware.js';
 import { PERMISSIONS } from '../config/permissions.js';
+import { uploadXlsx } from '../middleware/uploadXlsx.js';
 
 // Mounted at /api (so paths read /attendance, /leaves, /holidays).
 const router = Router();
@@ -15,6 +16,8 @@ router.use(verifyToken);
 router.post('/attendance/mark', markMyAttendance);
 router.get('/attendance/mine', listMyAttendance);
 router.post('/attendance', requirePermission(PERMISSIONS.ATTENDANCE_MANAGE), markAttendance);
+router.post('/attendance/bulk', requirePermission(PERMISSIONS.ATTENDANCE_MANAGE), markBulkAttendance);
+router.post('/attendance/bulk-upload', requirePermission(PERMISSIONS.ATTENDANCE_MANAGE), uploadXlsx, bulkUploadAttendance);
 router.get('/attendance', requirePermission(PERMISSIONS.ATTENDANCE_MANAGE), listAttendance);
 
 // Leave

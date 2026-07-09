@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as db from './helpers/testDb.js';
 import app from '../app.js';
 import { authAgent } from './helpers/factories.js';
+import ExcelJS from 'exceljs';
 import { computeStatutoryDeductions, computePF } from '../utils/statutoryEngine.js';
 
 before(async () => { await db.connect(); });
@@ -129,6 +130,55 @@ test('Employee 360 — admin gets a consolidated section-wise overview', async (
 
   // Employees cannot use the admin overview endpoint.
   assert.equal((await emp.get(`/api/users/${employee._id}/overview`)).status, 403);
+});
+
+test('Letter templates — set up offer/appointment/service/FNF templates', async () => {
+  const { admin, emp } = await setup();
+  const created = await admin.post('/api/letter-templates').send({
+    type: 'FNFLetter', name: 'Standard FNF', title: 'Full & Final Settlement',
+    bodyParagraphs: ['Dear {{employeeName}}, your full and final settlement is enclosed.']
+  });
+  assert.equal(created.status, 201);
+
+  const list = await admin.get('/api/letter-templates');
+  assert.equal(list.status, 200);
+  assert.equal(list.body.data.length, 1);
+  assert.ok(list.body.meta.types.includes('ServiceLetter'));
+  assert.ok(list.body.meta.placeholders.includes('employeeName'));
+
+  // Employees cannot manage letter templates.
+  assert.equal((await emp.get('/api/letter-templates')).status, 403);
+});
+
+test('Bulk attendance — mark many employees for a day in one call', async () => {
+  const { admin } = await setup();
+  const { user: a } = await authAgent(app, { email: 'a@xyz.com', role: 'employee' });
+  const { user: b } = await authAgent(app, { email: 'b@xyz.com', role: 'employee' });
+
+  const res = await admin.post('/api/attendance/bulk').send({ userIds: [String(a._id), String(b._id)], date: '2026-07-05', status: 'Present' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.count, 2);
+  assert.equal((await admin.get('/api/attendance').query({ userId: String(a._id) })).body.data.length, 1);
+});
+
+test('Bulk attendance — import from an .xlsx roster (by employeeId/email)', async () => {
+  const { admin } = await setup();
+  const { user } = await authAgent(app, { email: 'imp@xyz.com', role: 'employee', employeeDetails: { employeeId: 'EMP90001' } });
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Sheet1');
+  ws.addRow(['employeeId', 'email', 'date', 'status', 'checkIn', 'checkOut']);
+  ws.addRow(['EMP90001', '', '2026-07-05', 'Present', '09:30', '18:30']);
+  ws.addRow(['', 'imp@xyz.com', '2026-07-06', 'Half-Day', '', '']);
+  ws.addRow(['NOPE999', '', '2026-07-07', 'Present', '', '']); // unknown → failed row
+  const buffer = await wb.xlsx.writeBuffer();
+
+  const res = await admin.post('/api/attendance/bulk-upload')
+    .attach('roster', Buffer.from(buffer), { filename: 'att.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.imported.length, 2);
+  assert.equal(res.body.failed.length, 1);
+  assert.equal((await admin.get('/api/attendance').query({ userId: String(user._id) })).body.data.length, 2);
 });
 
 test('Epic 16 — statutory engine computes PF/ESI/PT/TDS', () => {
