@@ -29,12 +29,20 @@ import cfTemplateRoutes from './routes/cfTemplateRoutes.js';
 import cfIssueRoutes from './routes/cfIssueRoutes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import { tenantContextMiddleware } from './utils/tenantContext.js';
+import { corsOrigins } from './utils/clientOrigin.js';
 
 const app = express();
 
+const allowedOrigins = corsOrigins();
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    origin: (origin, cb) => {
+      // Allow non-browser clients (no Origin) and configured SPA origins.
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        return cb(null, true);
+      }
+      return cb(null, false);
+    },
     credentials: true // allow the HTTP-only auth cookie across origins
   })
 );

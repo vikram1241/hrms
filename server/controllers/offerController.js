@@ -15,9 +15,9 @@ import { generateOfferLetterPdf } from '../services/pdfService.js';
 import { upsertCandidateUser } from '../services/candidateService.js';
 import { provisionEmployee } from '../services/provisioningService.js';
 import { sendOfferInvite } from '../services/emailService.js';
+import { clientOrigin } from '../utils/clientOrigin.js';
 
 const ACCESS_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const clientOrigin = () => process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const exposeToken = () => process.env.NODE_ENV !== 'production';
 
 const resolveTemplate = async ({ templateId, templateName }) => {

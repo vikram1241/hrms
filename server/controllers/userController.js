@@ -17,9 +17,9 @@ import { provisionEmployee } from '../services/provisioningService.js';
 import { generateToken } from '../utils/tokens.js';
 import { sendPasswordSetup } from '../services/emailService.js';
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
+import { clientOrigin } from '../utils/clientOrigin.js';
 
 const SETUP_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-const clientOrigin = () => process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const displayName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email;
 
 const toPublicUser = (user) => {

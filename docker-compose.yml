@@ -26,21 +26,28 @@ services:
       context: ./server
       dockerfile: Dockerfile
     container_name: hrms-server
+    # API is reached via nginx on :80 (/api). Keep 5000 published only for debugging.
     ports:
       - "5000:5000"
     environment:
       NODE_ENV: production
+      PORT: 5000
       MONGO_URI: mongodb://admin:admin123@mongodb:27017/hrms?authSource=admin
       JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_key_change_in_production}
-      JWT_EXPIRE: ${JWT_EXPIRE:-7d}
-      REFRESH_TOKEN_EXPIRY: ${REFRESH_TOKEN_EXPIRY:-30d}
+      JWT_EXPIRES_IN: ${JWT_EXPIRE:-7d}
+      # Public SPA URL used in offer / password emails. Point this at the same
+      # domain (and port 80 / https) that maps to the client nginx container —
+      # NOT Vite :5173. Example: http://hrms-mirus.com
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost}
+      CLIENT_ORIGINS: ${CLIENT_ORIGINS:-}
+      COOKIE_NAME: ${COOKIE_NAME:-hrms_token}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@hrms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      FROM_EMAIL: ${FROM_EMAIL:-noreply@hrms.com}
+      MAIL_FROM: ${MAIL_FROM:-noreply@hrms.com}
     depends_on:
       mongodb:
         condition: service_healthy

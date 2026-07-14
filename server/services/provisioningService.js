@@ -1,8 +1,7 @@
 import crypto from 'node:crypto';
 import User from '../models/User.js';
 import { sendCredentials } from './emailService.js';
-
-const clientOrigin = () => process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+import { clientOrigin } from '../utils/clientOrigin.js';
 
 /**
  * Generate the next available employee id (EMP#####), guaranteed unique.
