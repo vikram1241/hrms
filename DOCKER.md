@@ -303,6 +303,8 @@ docker-compose exec server npm test
 
 # Update a single service
 docker-compose up -d --no-deps --build server
+docker-compose exec server npm run db:setup -- --company-code=mirus --company-name="Mirus Med Sciences" \
+  --admin-email=admin@mirus.com --admin-password='Admin@123'
 ```
 
 ## Monitoring

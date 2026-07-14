@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
-import { Building2, Upload, Stamp, PenTool } from 'lucide-react';
+import { Building2, Upload, Stamp, PenTool, Mail } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -11,6 +11,15 @@ import { getCompany, updateCompany, uploadCompanyAsset } from '../../api/company
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const asset = (url) => (url ? `/${url}` : null);
+
+const emptyMail = {
+  smtpHost: 'smtp.gmail.com',
+  smtpPort: 465,
+  smtpUser: '',
+  mailFrom: '',
+  smtpPass: '',
+  smtpPassSet: false
+};
 
 export default function CompanySettingsPage() {
   const dispatch = useDispatch();
@@ -25,7 +34,12 @@ export default function CompanySettingsPage() {
         contactEmail: company.contactEmail || '',
         branding: { ...company.branding },
         statutory: { ...company.statutory },
-        address: { ...company.address }
+        address: { ...company.address },
+        mail: {
+          ...emptyMail,
+          ...(company.mail || {}),
+          smtpPass: '' // never prefill secret; leave blank to keep existing
+        }
       });
     }
   }, [company]);
@@ -44,7 +58,13 @@ export default function CompanySettingsPage() {
   const save = async () => {
     setSaving(true);
     try {
-      await updateCompany(form);
+      const payload = structuredClone(form);
+      // Omit blank password so the server keeps the stored secret.
+      if (!payload.mail?.smtpPass?.trim()) {
+        if (payload.mail) delete payload.mail.smtpPass;
+      }
+      delete payload.mail?.smtpPassSet;
+      await updateCompany(payload);
       dispatch(notifySuccess('Company configuration saved.'));
       reload();
     } catch (err) { dispatch(notifyError(err.uiMessage)); }
@@ -83,7 +103,7 @@ export default function CompanySettingsPage() {
 
   return (
     <div>
-      <PageHeader title="Company Settings" subtitle="Branding, statutory numbers and the seal printed on issued PDFs"
+      <PageHeader title="Company Settings" subtitle="Branding, mail (SMTP), statutory numbers and PDF seal assets"
         actions={<Button onClick={save} loading={saving}>Save changes</Button>} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -108,6 +128,33 @@ export default function CompanySettingsPage() {
             {field('TAN', 'statutory.tan')}
             {field('GSTIN', 'statutory.gstin')}
             {field('CIN', 'statutory.cin')}
+          </div>
+        </CardBody></Card>
+
+        <Card className="lg:col-span-2"><CardBody>
+          <h3 className="mb-1 flex items-center gap-2 text-base font-semibold text-ink">
+            <Mail size={18} className="text-primary-600" /> Outbound email (SMTP)
+          </h3>
+          <p className="mb-3 text-xs text-muted">
+            Used for offer letters, credentials and payslip notices. Saved on this company and read from the database on every send.
+            {form.mail.smtpPassSet
+              ? ' A password is already stored — leave the password field blank to keep it.'
+              : ' No password stored yet — enter SMTP credentials to enable delivery.'}
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {field('SMTP host', 'mail.smtpHost', { placeholder: 'smtp.gmail.com' })}
+            {field('SMTP port', 'mail.smtpPort', { type: 'number' })}
+            {field('SMTP username', 'mail.smtpUser', { autoComplete: 'off' })}
+            {field('SMTP password', 'mail.smtpPass', {
+              type: 'password',
+              autoComplete: 'new-password',
+              placeholder: form.mail.smtpPassSet ? '•••••••• (unchanged)' : 'App password / SMTP secret'
+            })}
+            <div className="sm:col-span-2 lg:col-span-3">
+              {field('From address', 'mail.mailFrom', {
+                placeholder: 'e.g. Mirus Med Sciences <hr@mirus.com>'
+              })}
+            </div>
           </div>
         </CardBody></Card>
 

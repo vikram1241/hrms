@@ -9,6 +9,7 @@ import Button from '../../components/ui/Button.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import FormDialog from '../../components/ui/FormDialog.jsx';
 import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
+import CFIssuePanel from './CFIssuePanel.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { issueDocument } from '../../api/employeeDocs.js';
 import { listTypes, createType, deleteType, uploadForEmployee } from '../../api/uploadedDocs.js';
@@ -66,7 +67,7 @@ export default function DocCenterPage() {
 
   return (
     <div>
-      <PageHeader title="Documents Center" subtitle="Issue sealed company documents and manage uploadable document types" />
+      <PageHeader title="Documents Center" subtitle="Issue sealed company documents, generate C&F agreements, and manage uploadable document types" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card><CardBody>
@@ -101,6 +102,8 @@ export default function DocCenterPage() {
           </div>
         </CardBody></Card>
       </div>
+
+      <CFIssuePanel />
 
       <Card className="mt-4"><CardBody>
         <div className="mb-3 flex items-center justify-between">

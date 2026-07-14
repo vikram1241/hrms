@@ -18,6 +18,9 @@ secure document vault.
 ```bash
 cd server
 npm install
+cd server
+npm run db:setup -- --company-code=mirus --company-name="Mirus Med Sciences" \
+  --admin-email=admin@mirus.com --admin-password='Admin@123'
 ```
 
 ## 3. Configure environment
@@ -43,9 +46,19 @@ cp .env.example .env
 > tokens are also accepted via the `Authorization: Bearer <token>` header for
 > easy testing with curl/Postman.
 
-## 4. Seed demo data
+## 4. Seed / fresh setup
 
-Loads every module with coherent data (**destructive** — wipes HRMS collections):
+**Fresh install** (company code + admin — recommended):
+
+```bash
+npm run db:setup -- --company-code=mirus --company-name="Mirus Med Sciences" \
+  --admin-email=admin@mirus.com --admin-password='Admin@123'
+```
+
+Run with no flags for an interactive prompt. Optional SMTP flags:
+`--smtp-host`, `--smtp-port`, `--smtp-user`, `--smtp-pass`, `--mail-from`.
+
+**Full demo dataset** (**destructive** — wipes HRMS collections):
 
 ```bash
 npm run db:seed
@@ -53,17 +66,20 @@ npm run db:seed
 
 This prints login credentials and live candidate offer links. Defaults:
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@xyz.com` | `Admin@123` |
-| HR | `priya.hr@xyz.com` | `Password1` |
-| Employee | `rahul.kumar@xyz.com` | `Password1` |
+| Role | Company code | Email | Password |
+|---|---|---|---|
+| Admin | `mirus` | `admin@mirus.com` | `Admin@123` |
+| HR | `mirus` | `priya.hr@mirus.com` | `Password1` |
+| Employee | `mirus` | `rahul.kumar@mirus.com` | `Password1` |
 
 What gets created: 2 salary templates, admin + HR + 4 active employees (with
 frozen salary assignments and May/June 2026 payslips), vault documents, and
 2 offers (one `sent` with a live magic link, one `accepted` & signed).
 
 > Need just an admin on an existing DB? `npm run db:seed:admin`.
+
+Outbound email SMTP is stored on the **company** record and edited in
+**Company Settings**. Configure it during `db:setup` or later in the admin UI.
 
 ## 5. Run
 
@@ -219,7 +235,7 @@ Bulk roster columns (header row 1): `fullName, email, position, department, annu
 # Login (capture cookie)
 curl -c jar.txt -X POST localhost:5000/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@xyz.com","password":"Admin@123"}'
+  -d '{"companySlug":"mirus","email":"admin@mirus.com","password":"Admin@123"}'
 
 # Use the session
 curl -b jar.txt localhost:5000/api/users?limit=5

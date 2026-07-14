@@ -12,6 +12,7 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import TemplateDialog from './TemplateDialog.jsx';
 import LetterTemplatesSection from './LetterTemplatesSection.jsx';
+import CFTemplatesSection from './CFTemplatesSection.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { listTemplates, deactivateTemplate } from '../../api/salary.js';
 import { CALC_TYPES } from '../../config/constants.js';
@@ -44,16 +45,22 @@ export default function TemplatesPage() {
   return (
     <div>
       <PageHeader
-        title="Setup Templates" subtitle="Salary models and company letter templates"
+        title="Setup Templates"
+        subtitle="Salary models, HR letter templates and C&F agreement templates"
         actions={tab === 0 ? <Button onClick={() => setDialog({ open: true, template: null })}><Plus size={16} /> New Salary Model</Button> : null}
       />
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Salary Structures" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Letter Templates" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="C&F Templates" sx={{ textTransform: 'none', fontWeight: 600 }} />
       </Tabs>
 
-      {tab === 1 ? <LetterTemplatesSection /> : loading ? (
+      {tab === 2 ? (
+        <CFTemplatesSection />
+      ) : tab === 1 ? (
+        <LetterTemplatesSection />
+      ) : loading ? (
         <div className="flex justify-center py-20"><Spinner size={32} className="text-primary-600" /></div>
       ) : !templates?.length ? (
         <Card><EmptyState icon={SlidersHorizontal} title="No salary models yet" message="Create your first reusable salary structure to assign to employees." /></Card>

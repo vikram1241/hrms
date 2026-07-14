@@ -11,10 +11,11 @@ import User from '../models/User.js';
  *
  * Login uses a company code (slug):
  *   superadmin -> slug '_platform'
- *   company admin -> the seeded company slug (default 'xyz')
+ *   company admin -> the seeded company slug (default 'mirus')
  *
- * Run with: npm run db:seed
- */
+ * Run with: npm run db:seed:admin
+ *
+ * Prefer `npm run db:setup` for a guided fresh install (company code + admin).
 const upsertCompany = async (slug, name) => {
   let company = await Company.findOne({ slug });
   if (!company) company = await Company.create({ slug, name, status: 'active' });
@@ -65,11 +66,27 @@ const run = async () => {
   });
 
   // Default company + admin.
-  const companySlug = (process.env.SEED_COMPANY_SLUG || 'xyz').toLowerCase();
+  const companySlug = (process.env.SEED_COMPANY_SLUG || 'mirus').toLowerCase();
   const companyName = process.env.SEED_COMPANY_NAME || 'Mirus Med Sciences';
   const company = await upsertCompany(companySlug, companyName);
+  // Keep company display name in sync if the record already existed under this slug.
+  if (company.name !== companyName) {
+    company.name = companyName;
+  }
+  // Optional: hydrate SMTP from env into company.mail (runtime reads DB, not env).
+  if (process.env.SMTP_USER || process.env.SMTP_PASS || process.env.MAIL_FROM) {
+    company.mail = {
+      smtpHost: process.env.SMTP_HOST || company.mail?.smtpHost || 'smtp.gmail.com',
+      smtpPort: Number(process.env.SMTP_PORT) || company.mail?.smtpPort || 465,
+      smtpUser: process.env.SMTP_USER || company.mail?.smtpUser || '',
+      smtpPass: process.env.SMTP_PASS || company.mail?.smtpPass || '',
+      mailFrom: process.env.MAIL_FROM || company.mail?.mailFrom || ''
+    };
+    console.log('✅ Company SMTP settings taken from environment');
+  }
+  await company.save();
   await upsertUser(company, {
-    email: (process.env.SEED_ADMIN_EMAIL || 'admin@xyz.com').toLowerCase(),
+    email: (process.env.SEED_ADMIN_EMAIL || 'admin@mirus.com').toLowerCase(),
     password: process.env.SEED_ADMIN_PASSWORD || 'ChangeMe!123',
     role: 'admin',
     firstName: process.env.SEED_ADMIN_FIRST_NAME || 'Admin',

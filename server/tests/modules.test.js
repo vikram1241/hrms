@@ -150,6 +150,80 @@ test('Letter templates — set up offer/appointment/service/FNF templates', asyn
   assert.equal((await emp.get('/api/letter-templates')).status, 403);
 });
 
+test('C&F templates — create agent/distributor/wholesaler with PDF upload', async () => {
+  const { admin, emp } = await setup();
+
+  // Minimal PDF header so multer/file filter accepts it.
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+
+  const created = await admin
+    .post('/api/cf-templates')
+    .field('type', 'CFAgent')
+    .field('name', 'C&F Agent Agreement')
+    .field('description', 'Test agent template')
+    .attach('file', pdf, { filename: 'cf-agent.pdf', contentType: 'application/pdf' });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.template.type, 'CFAgent');
+  assert.equal(created.body.template.hasFile, true);
+
+  const list = await admin.get('/api/cf-templates');
+  assert.equal(list.status, 200);
+  assert.equal(list.body.data.length, 1);
+  assert.ok(list.body.meta.types.includes('CFDistributor'));
+  assert.ok(list.body.meta.types.includes('CFWholesaler'));
+
+  const file = await admin.get(`/api/cf-templates/${created.body.template._id}/file`);
+  assert.equal(file.status, 200);
+
+  assert.equal((await emp.get('/api/cf-templates')).status, 403);
+});
+
+test('C&F issue — fill blanks, generate PDF and queue email', async () => {
+  const { admin } = await setup();
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+  const tpl = await admin
+    .post('/api/cf-templates')
+    .field('type', 'CFDistributor')
+    .field('name', 'Distributor Standard')
+    .attach('file', pdf, { filename: 'dist.pdf', contentType: 'application/pdf' });
+  assert.equal(tpl.status, 201);
+
+  const fieldsMeta = await admin.get('/api/cf-issues/fields').query({ type: 'CFDistributor' });
+  assert.equal(fieldsMeta.status, 200);
+  assert.ok(fieldsMeta.body.fields.some((f) => f.key === 'partyName'));
+  assert.ok(fieldsMeta.body.fields.some((f) => f.key === 'recipientEmail'));
+
+  const issued = await admin.post('/api/cf-issues').send({
+    templateId: tpl.body.template._id,
+    fields: {
+      recipientEmail: 'partner@example.com',
+      agreementDay: '14',
+      agreementMonth: 'July',
+      agreementYear: '26',
+      agreementPlace: 'Hyderabad',
+      partyName: 'Acme Pharma Distributors',
+      partyAddress: '12 Road, Hyderabad',
+      territory: 'Telangana',
+      margin: '12%',
+      godownAddress: 'Warehouse Zone A',
+      monthlyTarget: '500000',
+      securityDeposit: '100000'
+    }
+  });
+  assert.equal(issued.status, 201);
+  assert.ok(issued.body.issue.pdfFileUrl);
+  assert.equal(issued.body.issue.recipientEmail, 'partner@example.com');
+  // In test env SMTP is stubbed — PDF is still generated.
+  assert.ok(['generated', 'sent', 'failed'].includes(issued.body.issue.status));
+
+  const list = await admin.get('/api/cf-issues');
+  assert.equal(list.status, 200);
+  assert.equal(list.body.data.length, 1);
+
+  const dl = await admin.get(`/api/cf-issues/${issued.body.issue._id}/pdf`);
+  assert.equal(dl.status, 200);
+});
+
 test('Bulk attendance — mark many employees for a day in one call', async () => {
   const { admin } = await setup();
   const { user: a } = await authAgent(app, { email: 'a@xyz.com', role: 'employee' });

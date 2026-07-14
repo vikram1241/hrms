@@ -33,8 +33,8 @@ const run = async () => {
     { upsert: true }
   );
 
-  const legacySlug = (process.env.LEGACY_COMPANY_SLUG || 'xyz').toLowerCase();
-  const legacyName = process.env.LEGACY_COMPANY_NAME || 'XYZ Software Solutions';
+  const legacySlug = (process.env.LEGACY_COMPANY_SLUG || 'mirus').toLowerCase();
+  const legacyName = process.env.LEGACY_COMPANY_NAME || 'Mirus Med Sciences';
   await Company.updateOne(
     { slug: legacySlug },
     { $setOnInsert: { slug: legacySlug, name: legacyName, status: 'active' } },

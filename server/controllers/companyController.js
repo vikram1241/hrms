@@ -1,4 +1,4 @@
-import Company from '../models/Company.js';
+import Company, { presentCompany } from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
@@ -13,10 +13,10 @@ const loadOwnCompany = async (req) => {
 /** GET /api/company — the caller's company configuration (Epic C). */
 export const getCompany = asyncHandler(async (req, res) => {
   const company = await loadOwnCompany(req);
-  res.status(200).json({ success: true, company });
+  res.status(200).json({ success: true, company: presentCompany(company) });
 });
 
-/** PUT /api/company — update branding, statutory numbers and address (Epic C). */
+/** PUT /api/company — update branding, statutory, address and mail (Epic C). */
 export const updateCompany = asyncHandler(async (req, res) => {
   const company = await loadOwnCompany(req);
   const b = req.body;
@@ -39,9 +39,31 @@ export const updateCompany = asyncHandler(async (req, res) => {
       if (b.address[k] !== undefined) company.address[k] = b.address[k];
     });
   }
+  if (b.mail) {
+    if (!company.mail) company.mail = {};
+    ['smtpHost', 'smtpUser', 'mailFrom'].forEach((k) => {
+      if (b.mail[k] !== undefined) company.mail[k] = b.mail[k];
+    });
+    if (b.mail.smtpPort !== undefined) {
+      const port = Number(b.mail.smtpPort);
+      if (!Number.isFinite(port) || port < 1 || port > 65535) {
+        throw new ApiError(400, 'smtpPort must be a number between 1 and 65535');
+      }
+      company.mail.smtpPort = port;
+    }
+    // Only overwrite the password when the client sends a non-empty value.
+    // Empty / omitted keeps the existing secret (UI uses a blank "leave unchanged" field).
+    if (typeof b.mail.smtpPass === 'string' && b.mail.smtpPass.trim()) {
+      company.mail.smtpPass = b.mail.smtpPass.trim();
+    }
+  }
 
   await company.save();
-  res.status(200).json({ success: true, message: 'Company configuration updated', company });
+  res.status(200).json({
+    success: true,
+    message: 'Company configuration updated',
+    company: presentCompany(company)
+  });
 });
 
 const ASSET_KINDS = { logo: 'logoUrl', letterhead: 'letterheadUrl', stamp: 'stampUrl', signature: 'signatureUrl' };

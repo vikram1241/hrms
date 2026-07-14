@@ -42,11 +42,37 @@ const CompanySchema = new mongoose.Schema({
     zipCode: { type: String, trim: true }
   },
 
+  /**
+   * Per-tenant SMTP / outbound mail settings. Read from the DB on every send
+   * (no process-wide env transporter). Password is never returned by the API.
+   */
+  mail: {
+    smtpHost: { type: String, trim: true, default: 'smtp.gmail.com' },
+    smtpPort: { type: Number, default: 465 },
+    smtpUser: { type: String, trim: true, default: '' },
+    smtpPass: { type: String, default: '' },
+    mailFrom: { type: String, trim: true, default: '' }
+  },
+
   contactEmail: { type: String, trim: true, lowercase: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
 
 /** The reserved platform tenant slug (houses superadmins). */
 export const PLATFORM_SLUG = '_platform';
+
+/** API-safe company document — SMTP password never leaves the server. */
+export const presentCompany = (company) => {
+  const o = typeof company.toObject === 'function' ? company.toObject() : { ...company };
+  const mail = o.mail || {};
+  o.mail = {
+    smtpHost: mail.smtpHost || 'smtp.gmail.com',
+    smtpPort: mail.smtpPort || 465,
+    smtpUser: mail.smtpUser || '',
+    mailFrom: mail.mailFrom || '',
+    smtpPassSet: Boolean(mail.smtpPass)
+  };
+  return o;
+};
 
 export default mongoose.model('Company', CompanySchema);

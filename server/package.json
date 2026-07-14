@@ -9,7 +9,8 @@
     "start": "node server.js",
     "test": "node --test --test-concurrency=1 tests/",
     "db:seed": "node seed/seed.js",
-    "db:seed:admin": "node seed/seedAdmin.js"
+    "db:seed:admin": "node seed/seedAdmin.js",
+    "db:setup": "node seed/setup.js"
   },
   "engines": {
     "node": ">=18"

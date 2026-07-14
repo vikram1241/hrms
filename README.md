@@ -1,4 +1,4 @@
-# XYZ HRMS — Enterprise MERN Human Resource Management System
+# mirus — Enterprise MERN Human Resource Management System
 
 A **multi-tenant** full-stack HRMS covering the complete employee lifecycle:
 authentication with **permission-based RBAC** (superadmin / admin / HR / employee),
@@ -71,28 +71,35 @@ docker-compose exec server npm run db:seed
 
 # Or seed only admin user
 docker-compose exec server npm run db:seed:admin
+
+# Fresh setup (company code + admin email/password, optional SMTP)
+docker-compose exec server npm run db:setup -- --company-code=mirus --company-name="Mirus Med Sciences" --admin-email=admin@mirus.com --admin-password='Admin@123'
 ```
 
-`npm run db:seed` drops the database, loads a full demo company (`xyz`) across
-**every** module, and prints the credentials + a live candidate offer link.
+`npm run db:seed` drops the database, loads a full demo company (`mirus` —
+**Mirus Med Sciences**) across **every** module, and prints the credentials + a
+live candidate offer link.
 
 > **Multi-tenant login:** the app is multi-tenant, so sign-in requires a
 > **Company code** (the tenant slug) in addition to email + password. The demo
-> company's code is **`xyz`**; the platform superadmin uses **`_platform`**.
+> company's code is **`mirus`**; the platform superadmin uses **`_platform`**.
 
 | Role | Company code | Email | Password |
 |---|---|---|---|
-| Admin | `xyz` | `admin@xyz.com` | `Admin@123` |
-| HR | `xyz` | `priya.hr@xyz.com` | `Password1` |
-| Employee | `xyz` | `rahul.kumar@xyz.com` | `Password1` |
+| Admin | `mirus` | `admin@mirus.com` | `Admin@123` |
+| HR | `mirus` | `priya.hr@mirus.com` | `Password1` |
+| Employee | `mirus` | `rahul.kumar@mirus.com` | `Password1` |
 | Superadmin (manages tenants) | `_platform` | `super@platform.local` | `ChangeMe!123` |
 
-Additional seeded employees (company `xyz`, password `Password1`):
-`amit.patel@xyz.com`, `neha.gupta@xyz.com`, `sunny.deol@xyz.com`.
+Additional seeded employees (company `mirus`, password `Password1`):
+`amit.patel@mirus.com`, `neha.gupta@mirus.com`, `sunny.deol@mirus.com`.
 
-> `npm run db:seed:admin` is the lighter bootstrap — it seeds only the platform
-> superadmin and one company admin (company code `xyz`, `admin@xyz.com` /
-> `ChangeMe!123`) without the demo dataset.
+> **`npm run db:setup`** is the recommended bootstrap for a fresh install — creates
+> the platform superadmin + one company admin from CLI flags (or an interactive
+> prompt). SMTP can be configured during setup or later under **Company Settings**.
+>
+> `npm run db:seed:admin` is a lighter non-interactive bootstrap (company code
+> `mirus`, `admin@mirus.com` / `ChangeMe!123`) without the demo dataset.
 
 ### 2. Frontend (`/client`)
 
@@ -117,6 +124,7 @@ so no extra CORS/env config is needed for local development. Open
 | `server` | `npm run dev` | Start API with auto-reload (nodemon) |
 | `server` | `npm start` | Start API (plain node) |
 | `server` | `npm run db:seed` | Load full demo dataset (wipes HRMS collections) |
+| `server` | `npm run db:setup` | Fresh company + admin (CLI or interactive) |
 | `server` | `npm run db:seed:admin` | Seed only an admin account |
 | `server` | `npm test` | Run API + unit tests (in-memory Mongo, serial) |
 | `client` | `npm run dev` | Start the SPA dev server |
@@ -152,6 +160,10 @@ so no extra CORS/env config is needed for local development. Open
 | `CLIENT_ORIGIN` |  | `http://localhost:5173` | CORS origin + magic-link base URL |
 | `JWT_EXPIRES_IN` |  | `1d` | Token lifetime |
 | `COOKIE_NAME` |  | `hrms_token` | Auth cookie name |
+
+> **SMTP:** outbound mail credentials live on each company document and are
+> edited in **Company Settings** (admin). Optional `SMTP_*` / `MAIL_FROM` env
+> vars are only used to pre-fill company mail when seeding/setup runs.
 
 See [`server/README.md`](server/README.md) for the full API reference and architecture notes.
 

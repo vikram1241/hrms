@@ -25,6 +25,8 @@ import trainingRoutes from './routes/trainingRoutes.js';
 import assetRoutes from './routes/assetRoutes.js';
 import exitRoutes from './routes/exitRoutes.js';
 import letterTemplateRoutes from './routes/letterTemplateRoutes.js';
+import cfTemplateRoutes from './routes/cfTemplateRoutes.js';
+import cfIssueRoutes from './routes/cfIssueRoutes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import { tenantContextMiddleware } from './utils/tenantContext.js';
 
@@ -69,6 +71,8 @@ app.use('/api/training', trainingRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/exits', exitRoutes);
 app.use('/api/letter-templates', letterTemplateRoutes);
+app.use('/api/cf-templates', cfTemplateRoutes);
+app.use('/api/cf-issues', cfIssueRoutes);
 // Attendance/leaves/holidays share one router with absolute subpaths.
 app.use('/api', attendanceRoutes);
 

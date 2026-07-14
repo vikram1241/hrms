@@ -1,5 +1,10 @@
 import 'dotenv/config';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import crypto from 'node:crypto';
 import mongoose from 'mongoose';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import connectDB from '../config/db.js';
 import Company, { PLATFORM_SLUG } from '../models/Company.js';
 import User from '../models/User.js';
@@ -18,12 +23,14 @@ import DocumentType from '../models/DocumentType.js';
 import EmployeeDocumentRecord from '../models/EmployeeDocumentRecord.js';
 import { TrainingSection, TrainingMedia } from '../models/trainingLibrary.js';
 import ExitRecord from '../models/ExitRecord.js';
+import CFTemplate from '../models/CFTemplate.js';
 import { computeBreakdown } from '../utils/salaryEngine.js';
 import { rupeesToPaisa } from '../utils/money.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import { generateToken } from '../utils/tokens.js';
 import { runWithStore } from '../utils/tenantContext.js';
 import { generatePayslipPdf, generateOfferLetterPdf, bakeSignatureOnOffer, generateCompanyDocPdf } from '../services/pdfService.js';
+import { CF_TEMPLATE_DIR, cfTemplateRelPath } from '../middleware/uploadCFTemplate.js';
 
 /**
  * Comprehensive multi-tenant demo seed — loads EVERY module with coherent data
@@ -121,10 +128,19 @@ const run = async () => {
 
   // --- Demo company with statutory config + branding ---
   const company = await Company.create({
-    slug: 'xyz', name: 'Mirus Med Sciences', status: 'active', contactEmail: 'hr@xyz.com',
+    slug: 'mirus', name: 'Mirus Med Sciences', status: 'active', contactEmail: 'hr@mirus.com',
     branding: { authorizedSignatoryName: 'Priya Sharma', authorizedSignatoryDesignation: 'HR Manager' },
     statutory: { pfNumber: 'PF-KA-1234567', esiNumber: 'ESI-77-999', ptNumber: 'PT-KA-555', tan: 'BLRX01234C', gstin: '29ABCDE1234F1Z5' },
-    address: addr()
+    address: addr(),
+    // Prefer company-stored SMTP (Company Settings). Optionally hydrate from
+    // env on first seed so local demo mail works without a manual UI step.
+    mail: {
+      smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com',
+      smtpPort: Number(process.env.SMTP_PORT) || 465,
+      smtpUser: process.env.SMTP_USER || '',
+      smtpPass: process.env.SMTP_PASS || '',
+      mailFrom: process.env.MAIL_FROM || 'Mirus Med Sciences <hr@mirus.com>'
+    }
   });
 
   // Everything below runs inside the demo company's tenant context so companyId
@@ -132,15 +148,15 @@ const run = async () => {
   const summary = await runWithStore({ companyId: String(company._id), role: 'admin', authed: true }, () => seedCompany(company));
 
   console.log('\n========================================================');
-  console.log('  HRMS MULTI-TENANT DEMO DATA LOADED');
+  console.log('  MIRUS MULTI-TENANT DEMO DATA LOADED');
   console.log('========================================================');
   Object.entries(summary).filter(([k]) => !k.startsWith('_')).forEach(([k, v]) => console.log(`  ${k.padEnd(14)}${v}`));
   console.log('--------------------------------------------------------');
   console.log('  LOGIN (company code / email / password)');
-  console.log('   Company code (slug):  xyz');
-  console.log('   Admin:      xyz / admin@xyz.com / Admin@123');
-  console.log(`   HR:         xyz / priya.hr@xyz.com / ${DEMO_PASSWORD}`);
-  console.log(`   Employee:   xyz / rahul.kumar@xyz.com / ${DEMO_PASSWORD}`);
+  console.log('   Company code (slug):  mirus');
+  console.log('   Admin:      mirus / admin@mirus.com / Admin@123');
+  console.log(`   HR:         mirus / priya.hr@mirus.com / ${DEMO_PASSWORD}`);
+  console.log(`   Employee:   mirus / rahul.kumar@mirus.com / ${DEMO_PASSWORD}`);
   console.log('   Superadmin: _platform / super@platform.local / ChangeMe!123');
   if (summary._offerLink) {
     console.log('--------------------------------------------------------');
@@ -158,12 +174,12 @@ async function seedCompany(company) {
 
   // --- Admin + HR ---
   await User.create({
-    email: 'admin@xyz.com', password: 'Admin@123', role: 'admin', isActive: true, onboardingStage: 'completed',
+    email: 'admin@mirus.com', password: 'Admin@123', role: 'admin', isActive: true, onboardingStage: 'completed',
     personalDetails: { firstName: 'Admin', lastName: 'System', dateOfBirth: new Date('1988-01-01'), gender: 'Prefer not to say' },
     contactInfo: baseContact()
   });
   await User.create({
-    email: 'priya.hr@xyz.com', password: DEMO_PASSWORD, role: 'hr', isActive: true, onboardingStage: 'completed',
+    email: 'priya.hr@mirus.com', password: DEMO_PASSWORD, role: 'hr', isActive: true, onboardingStage: 'completed',
     personalDetails: { firstName: 'Priya', lastName: 'Sharma', dateOfBirth: new Date('1990-06-15'), gender: 'Female' },
     contactInfo: baseContact(),
     employeeDetails: { employeeId: 'EMP45871', designation: 'HR Manager', department: 'HR', dateOfJoining: new Date('2021-04-01') }
@@ -171,10 +187,10 @@ async function seedCompany(company) {
 
   // --- Employees ---
   const employeesSpec = [
-    { email: 'rahul.kumar@xyz.com', first: 'Rahul', last: 'Kumar', empId: 'EMP45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true },
-    { email: 'amit.patel@xyz.com', first: 'Amit', last: 'Patel', empId: 'EMP45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation' },
-    { email: 'neha.gupta@xyz.com', first: 'Neha', last: 'Gupta', empId: 'EMP45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent' },
-    { email: 'sunny.deol@xyz.com', first: 'Sunny', last: 'Deol', empId: 'EMP45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true }
+    { email: 'rahul.kumar@mirus.com', first: 'Rahul', last: 'Kumar', empId: 'EMP45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true },
+    { email: 'amit.patel@mirus.com', first: 'Amit', last: 'Patel', empId: 'EMP45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation' },
+    { email: 'neha.gupta@mirus.com', first: 'Neha', last: 'Gupta', empId: 'EMP45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent' },
+    { email: 'sunny.deol@mirus.com', first: 'Sunny', last: 'Deol', empId: 'EMP45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true }
   ];
 
   const employees = [];
@@ -213,6 +229,7 @@ async function seedCompany(company) {
   }
 
   await seedModules(company, employees);
+  await seedCFTemplates();
 
   // --- Offers: one sent (live link) + one accepted ---
   const link = await seedOffers(engTpl);
@@ -232,6 +249,7 @@ async function seedCompany(company) {
     'Doc types': await DocumentType.countDocuments(),
     'Training sec.': await TrainingSection.countDocuments(),
     Exits: await ExitRecord.countDocuments(),
+    'C&F templates': await CFTemplate.countDocuments(),
     _offerLink: link
   };
 }
@@ -340,6 +358,101 @@ async function seedOffers(engTpl) {
     }
   }
   return liveLink;
+}
+
+/**
+ * Seed C&F agreement templates:
+ * - Agent from seed/cf-examples/cf-agent.pdf (C&F new)
+ * - Distributor from seed/cf-examples/cf-distributor.pdf
+ * - Wholesaler as a generated sample PDF (no external source file yet)
+ */
+async function seedCFTemplates() {
+  fs.mkdirSync(CF_TEMPLATE_DIR, { recursive: true });
+  const examplesDir = path.resolve('seed', 'cf-examples');
+
+  const installExample = async ({ type, name, description, sourceName, originalFileName }) => {
+    const src = path.join(examplesDir, sourceName);
+    if (!fs.existsSync(src)) {
+      console.warn(`⚠️  Missing C&F example ${sourceName} — skipping ${name}`);
+      return;
+    }
+    const filename = `${crypto.randomUUID()}.pdf`;
+    await fsp.copyFile(src, path.join(CF_TEMPLATE_DIR, filename));
+    await CFTemplate.create({
+      type,
+      name,
+      description,
+      fileUrl: cfTemplateRelPath(filename),
+      originalFileName,
+      mimeType: 'application/pdf',
+      active: true
+    });
+  };
+
+  await installExample({
+    type: 'CFAgent',
+    name: 'C&F Agent Agreement',
+    description: 'Standard C&F Agent appointment agreement (from C&F new).',
+    sourceName: 'cf-agent.pdf',
+    originalFileName: 'C&F Agent Agreement.pdf'
+  });
+
+  await installExample({
+    type: 'CFDistributor',
+    name: 'C&F Distributor Agreement',
+    description: 'Standard C&F Distributor appointment agreement.',
+    sourceName: 'cf-distributor.pdf',
+    originalFileName: 'C&F Distributor Agreement.pdf'
+  });
+
+  // Wholesaler sample — generated placeholder until a branded PDF is supplied.
+  const wholesalerPdf = await buildWholesalerSamplePdf();
+  const wholesalerName = `${crypto.randomUUID()}.pdf`;
+  await fsp.writeFile(path.join(CF_TEMPLATE_DIR, wholesalerName), wholesalerPdf);
+  await CFTemplate.create({
+    type: 'CFWholesaler',
+    name: 'C&F Wholesaler Agreement',
+    description: 'Sample C&F Wholesaler agreement template. Replace with the official PDF when available.',
+    fileUrl: cfTemplateRelPath(wholesalerName),
+    originalFileName: 'C&F Wholesaler Agreement.pdf',
+    mimeType: 'application/pdf',
+    active: true
+  });
+}
+
+async function buildWholesalerSamplePdf() {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const ink = rgb(0.18, 0.18, 0.18);
+  let y = 780;
+  const line = (text, size = 11, useBold = false, gap = 18) => {
+    page.drawText(String(text), { x: 48, y, size, font: useBold ? bold : font, color: ink });
+    y -= gap;
+  };
+  line('Mirus Med Sciences Private Limited', 16, true, 28);
+  line('C & F WHOLESALER AGREEMENT', 13, true, 28);
+  line('This agreement is entered into on this ______ day of ______ Year 20__ at ______________.');
+  line('By and between:');
+  line('Mirus Med Sciences Private Limited (the "Company")');
+  line('AND');
+  line('Mr./Mrs./Ms ________________________________ (the "C&F Wholesaler").', 11, false, 24);
+  line('1. Appointment & Territory', 12, true);
+  line('The Company appoints the C&F Wholesaler for sale of Products in the territory of __________.');
+  line('2. Duration', 12, true);
+  line('This Agreement is effective for one year and may be renewed by mutual written agreement.');
+  line('3. Supply & Payment', 12, true);
+  line('Products supplied FOR to the Wholesaler godown. Margin ____ %. Payment: advance / as agreed.');
+  line('4. Licenses', 12, true);
+  line('The Wholesaler shall maintain valid drug wholesale licenses (Form 20B / 21B) throughout.');
+  line('5. General', 12, true, 22);
+  line('This sample template may be replaced under Setup Templates → C&F Templates.');
+  y -= 40;
+  line('For the Company                          For the C&F Wholesaler', 10, false, 40);
+  line('______________________                  ______________________', 10, false, 16);
+  line('Authorized Signatory                     Authorized Signatory', 9);
+  return Buffer.from(await doc.save());
 }
 
 run().catch(async (err) => {

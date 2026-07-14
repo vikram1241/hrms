@@ -12,7 +12,8 @@ export const OFFER_DIR = path.resolve(ROOT, 'uploads', 'offers');
 export const SIGNED_OFFER_DIR = path.resolve(ROOT, 'uploads', 'offers', 'signed');
 export const GENERATED_DOC_DIR = path.resolve(ROOT, 'uploads', 'documents', 'generated');
 export const FILLED_DOC_DIR = path.resolve(ROOT, 'uploads', 'documents', 'filled');
-[PAYSLIP_DIR, OFFER_DIR, SIGNED_OFFER_DIR, GENERATED_DOC_DIR, FILLED_DOC_DIR].forEach((d) => fs.mkdirSync(d, { recursive: true }));
+export const CF_ISSUED_DIR = path.resolve(ROOT, 'uploads', 'cf-issued');
+[PAYSLIP_DIR, OFFER_DIR, SIGNED_OFFER_DIR, GENERATED_DOC_DIR, FILLED_DOC_DIR, CF_ISSUED_DIR].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 
 const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -269,6 +270,142 @@ export const fillAcroFormPdf = async (sourceRelPath, fieldValues = {}) => {
 
   form.flatten(); // bake values into page content so they can't be edited later
   const file = path.join(FILLED_DOC_DIR, `filled-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(file, await doc.save());
+  return relPath(file);
+};
+
+/** True when the PDF has at least one AcroForm field. */
+export const pdfHasAcroForms = async (sourceRelPath) => {
+  const sourceAbs = path.resolve(ROOT, sourceRelPath);
+  if (!fs.existsSync(sourceAbs)) return false;
+  try {
+    const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
+    return doc.getForm().getFields().length > 0;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Generate a filled C&F agreement PDF.
+ * Prefers filling AcroForm fields on the uploaded template when present;
+ * otherwise renders a complete agreement page with the blank values inserted.
+ * @returns {Promise<string>} repo-relative path
+ */
+export const generateCFAgreementPdf = async ({ type, fields = {}, company, templateTitle, templateFileUrl }) => {
+  const v = (k, fallback = '') => String(fields[k] ?? fallback).trim();
+
+  if (templateFileUrl && (await pdfHasAcroForms(templateFileUrl))) {
+    const filled = await fillAcroFormPdf(templateFileUrl, fields);
+    // Move/copy into cf-issued for a stable issued-docs location.
+    const bytes = await fsp.readFile(path.resolve(ROOT, filled));
+    const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
+    await fsp.writeFile(dest, bytes);
+    try { await fsp.unlink(path.resolve(ROOT, filled)); } catch { /* ignore */ }
+    return relPath(dest);
+  }
+
+  const companyName = company?.name || 'Mirus Med Sciences Private Limited';
+  const typeTitles = {
+    CFAgent: 'C & F AGENT AGREEMENT',
+    CFDistributor: 'C & F DISTRIBUTOR AGREEMENT',
+    CFWholesaler: 'C & F WHOLESALER AGREEMENT'
+  };
+  const partyLabel = {
+    CFAgent: 'C & F Agent',
+    CFDistributor: 'C&F Distributor',
+    CFWholesaler: 'C&F Wholesaler'
+  }[type] || 'C&F Partner';
+
+  const title = templateTitle || typeTitles[type] || 'C & F AGREEMENT';
+  const day = v('agreementDay', '____');
+  const month = v('agreementMonth', '____');
+  const year = v('agreementYear', '__');
+  const place = v('agreementPlace', '____________');
+  const partyName = v('partyName', '________________');
+  const partyAddress = v('partyAddress', '________________');
+  const territory = v('territory', '____________');
+  const margin = v('margin', '____');
+  const godown = v('godownAddress', '____________');
+  const target = v('monthlyTarget', '____');
+  const deposit = v('securityDeposit', '____________');
+  const witness1 = v('witness1', '________________');
+  const witness2 = v('witness2', '________________');
+
+  const paragraphs = [
+    `This agreement is entered into on this ${day} day of ${month} Year 20${year} at ${place}.`,
+    `By and between: ${companyName} (hereinafter referred to as the "Company")`,
+    `AND`,
+    `${partyName}`,
+    partyAddress,
+    `hereinafter referred to as the "${partyLabel}".`,
+    `WHEREAS the Company desires to appoint the ${partyLabel} for the sale and distribution of its Products in the assigned territory, and the ${partyLabel} has agreed to act on the following terms.`,
+    `1. Appointment & Territory`,
+    `The Company hereby appoints the ${partyLabel} for distribution of its Products in the territory of ${territory} (the "Assigned Territory").`,
+    `2. Duration`,
+    `This Agreement shall be effective from the ${day} day of ${month} 20${year} and shall remain in force for a period of one year. It may be renewed by mutual written agreement.`,
+    `3. Supply of Products`,
+    `3.1 Products will be supplied on FOR basis to the ${partyLabel}'s godown/warehouse at ${godown} at the prices agreed upon.`,
+    `3.2 A margin of ${margin} shall be allowed to the ${partyLabel}.`,
+    `3.3 Payment terms shall be advance payment / as mutually agreed. Orders shall be placed at least 30 days in advance.`,
+    `4. Sales Target`,
+    `The monthly sales target for the Assigned Territory shall be ${target}. The ${partyLabel} shall make best efforts to achieve the target.`,
+    `5. Security Deposit`,
+    `The interest-free security deposit as agreed by both parties in this agreement will be Rs ${deposit}.`,
+    `6. Obligations`,
+    `The ${partyLabel} shall maintain valid drug licenses where applicable, keep at least 30 days inventory, maintain stock registers, ensure safe storage, appoint dealers/wholesalers/retailers to cover the Assigned Territory, and not deal with competitor products during the term.`,
+    `7. Termination`,
+    `Either party may terminate this Agreement by giving three months' written notice. Upon termination, outstanding dues shall be settled and any security deposit refunded within 45 days after adjustment.`,
+    `8. Jurisdiction`,
+    `All disputes shall be subject to the jurisdiction of courts at Mumbai only. Arbitration under the Arbitration and Conciliation Act, 1996 shall also apply.`,
+    `IN WITNESS WHEREOF the parties have executed this Agreement on the date first above written.`
+  ];
+
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const black = rgb(0.12, 0.12, 0.12);
+  let page = doc.addPage([595, 842]);
+  let y = 800;
+
+  const ensureSpace = (need = 40) => {
+    if (y < need) {
+      page = doc.addPage([595, 842]);
+      y = 800;
+    }
+  };
+  const write = (s, opts = {}) => {
+    const size = opts.size ?? 10;
+    const f = opts.bold ? bold : font;
+    ensureSpace(size + 20);
+    page.drawText(ascii(s), { x: opts.x ?? 48, y, size, font: f, color: black });
+    y -= opts.gap ?? (size + 6);
+  };
+
+  write(companyName, { size: 14, bold: true, gap: 20 });
+  write(title, { size: 12, bold: true, gap: 22 });
+
+  for (const para of paragraphs) {
+    if (/^\d+\. /.test(para) || para === 'AND') {
+      y -= 6;
+      write(para, { size: 10, bold: true, gap: 14 });
+      continue;
+    }
+    for (const ln of wrapText(para, 92)) write(ln, { size: 10, gap: 13 });
+    y -= 4;
+  }
+
+  y -= 16;
+  ensureSpace(120);
+  write(`For ${companyName}`, { size: 10, bold: true, gap: 36 });
+  write('Authorized Signatory', { size: 9, gap: 28 });
+  write(`${partyLabel}`, { size: 10, bold: true, gap: 36 });
+  write('Signature & Seal', { size: 9, gap: 24 });
+  write('Witnesses:', { size: 10, bold: true, gap: 16 });
+  write(`1. ${witness1}`, { size: 10, gap: 14 });
+  write(`2. ${witness2}`, { size: 10, gap: 14 });
+
+  const file = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
   await fsp.writeFile(file, await doc.save());
   return relPath(file);
 };

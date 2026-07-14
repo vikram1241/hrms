@@ -5,7 +5,7 @@ import { Mail, Lock, Eye, EyeOff, ShieldCheck, Building2 } from 'lucide-react';
 import Button from '../components/ui/Button.jsx';
 import Input from '../components/ui/Input.jsx';
 import BrandLogo from '../components/ui/BrandLogo.jsx';
-import { APP_NAME, COMPANY_NAME } from '../config/brand.js';
+import { APP_NAME, COMPANY_CODE, COMPANY_NAME } from '../config/brand.js';
 import { login, selectAuth } from '../features/auth/authSlice.js';
 
 // Remember the last company code so returning users don't retype it.
@@ -15,7 +15,11 @@ export default function Login() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { status, error } = useSelector(selectAuth);
-  const [form, setForm] = useState({ companySlug: localStorage.getItem(LAST_SLUG_KEY) || '', email: '', password: '' });
+  const [form, setForm] = useState({
+    companySlug: localStorage.getItem(LAST_SLUG_KEY) || COMPANY_CODE,
+    email: '',
+    password: ''
+  });
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState({});
@@ -78,7 +82,7 @@ export default function Login() {
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <Input
-              id="companySlug" type="text" label="Company code" placeholder="e.g. mirus" icon={Building2}
+              id="companySlug" type="text" label="Company code" placeholder={COMPANY_CODE} icon={Building2}
               value={form.companySlug}
               onChange={(e) => setForm({ ...form, companySlug: e.target.value })}
               onBlur={() => setTouched((t) => ({ ...t, companySlug: true }))}
