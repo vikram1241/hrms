@@ -11,6 +11,7 @@ RUN npm ci --only=production
 # Copy application code
 COPY . .
 
+COPY .env.example .env
 # Create uploads directory for document storage
 RUN mkdir -p uploads/documents
 

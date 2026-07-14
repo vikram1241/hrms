@@ -7,15 +7,15 @@ import { getOfferByToken, signOffer } from '../../api/candidate.js';
 import SignaturePad from '../../components/feature/SignaturePad.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Spinner from '../../components/ui/Spinner.jsx';
+import BrandLogo from '../../components/ui/BrandLogo.jsx';
 
 function Branded({ children }) {
   return (
     <div className="min-h-screen bg-surface">
       <header className="border-b border-line bg-white">
-        <div className="mx-auto flex max-w-4xl items-center gap-2.5 px-4 py-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-600 font-extrabold text-white">X</div>
-          <div className="leading-tight">
-            <p className="text-sm font-bold text-ink">XYZ Software Solutions</p>
+        <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-4">
+          <BrandLogo variant="full" className="h-10" />
+          <div className="leading-tight border-l border-line pl-3">
             <p className="text-xs text-muted">Career Offer Portal</p>
           </div>
         </div>

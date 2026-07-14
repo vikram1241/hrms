@@ -121,7 +121,7 @@ const run = async () => {
 
   // --- Demo company with statutory config + branding ---
   const company = await Company.create({
-    slug: 'xyz', name: 'XYZ Software Solutions', status: 'active', contactEmail: 'hr@xyz.com',
+    slug: 'xyz', name: 'Mirus Med Sciences', status: 'active', contactEmail: 'hr@xyz.com',
     branding: { authorizedSignatoryName: 'Priya Sharma', authorizedSignatoryDesignation: 'HR Manager' },
     statutory: { pfNumber: 'PF-KA-1234567', esiNumber: 'ESI-77-999', ptNumber: 'PT-KA-555', tan: 'BLRX01234C', gstin: '29ABCDE1234F1Z5' },
     address: addr()
@@ -281,7 +281,7 @@ async function seedModules(company, employees) {
   const pdfUrl = await generateCompanyDocPdf({
     title: 'Employee Handbook Acknowledgment', company,
     employeeName: 'Rahul Kumar', designation: 'Senior Software Engineer', effectiveDate: new Date('2022-07-01'),
-    paragraphs: ['I acknowledge that I have received and read the employee handbook of XYZ Software Solutions.', 'I agree to comply with the company policies.']
+    paragraphs: ['I acknowledge that I have received and read the employee handbook of Mirus Med Sciences.', 'I agree to comply with the company policies.']
   });
   await EmployeeDocument.create({ userId: rahul._id, type: 'Handbook', title: 'Employee Handbook Acknowledgment', pdfFileUrl: pdfUrl, requiresSignature: false, status: 'acknowledged', acknowledgedAt: new Date() });
 

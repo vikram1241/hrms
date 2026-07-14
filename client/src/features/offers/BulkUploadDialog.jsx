@@ -4,10 +4,12 @@ import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
-import { UploadCloud, FileSpreadsheet, CheckCircle2, XCircle } from 'lucide-react';
+import { UploadCloud, FileSpreadsheet, CheckCircle2, XCircle, Download } from 'lucide-react';
 import Button from '../../components/ui/Button.jsx';
 import { bulkUploadOffers } from '../../api/offers.js';
 import { notifyError } from '../ui/toastSlice.js';
+
+const SAMPLE_XLSX = '/samples/bulk-offers-sample.xlsx';
 
 export default function BulkUploadDialog({ open, onClose, onDone }) {
   const dispatch = useDispatch();
@@ -46,6 +48,19 @@ export default function BulkUploadDialog({ open, onClose, onDone }) {
       <DialogContent dividers>
         {!result ? (
           <>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2.5">
+              <div className="text-xs text-muted">
+                <p className="font-medium text-ink">Need the Excel format?</p>
+                <p>Columns: fullName, email, position, department, annualCTC, joiningDate, templateName</p>
+              </div>
+              <a
+                href={SAMPLE_XLSX}
+                download="bulk-offers-sample.xlsx"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-xs font-semibold text-primary-700 shadow-sm hover:border-primary-300 hover:bg-primary-50"
+              >
+                <Download size={14} /> Download sample .xlsx
+              </a>
+            </div>
             <div
               onClick={() => inputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -55,13 +70,8 @@ export default function BulkUploadDialog({ open, onClose, onDone }) {
             >
               <UploadCloud size={36} className="text-primary-500" />
               <p className="text-sm font-medium text-ink">{file ? file.name : 'Drag & drop your roster.xlsx, or click to browse'}</p>
-              <p className="text-xs text-muted">.xlsx with columns: fullName, email, position, department, annualCTC, joiningDate, templateName</p>
+              <p className="text-xs text-muted">.xlsx · templateName must match an existing salary template</p>
               <input ref={inputRef} type="file" accept=".xlsx,.xls" hidden onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            </div>
-            <div className="mt-2 text-center">
-              <a href="/samples/bulk-offers-sample.xlsx" download onClick={(e) => e.stopPropagation()}
-                className="text-xs font-medium text-primary-600 hover:underline">Download sample .xlsx</a>
-              <span className="ml-1 text-xs text-muted">· templateName must match an existing salary template</span>
             </div>
             {file && (
               <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">

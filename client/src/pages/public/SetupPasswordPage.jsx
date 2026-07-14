@@ -4,6 +4,7 @@ import { Lock, CheckCircle2 } from 'lucide-react';
 import { setupPassword } from '../../api/candidate.js';
 import Input from '../../components/ui/Input.jsx';
 import Button from '../../components/ui/Button.jsx';
+import BrandLogo from '../../components/ui/BrandLogo.jsx';
 
 export default function SetupPasswordPage() {
   const { token } = useParams();
@@ -32,9 +33,8 @@ export default function SetupPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface px-6 py-12">
       <div className="w-full max-w-sm rounded-xl border border-line bg-white p-8 shadow-card">
-        <div className="mb-6 flex items-center gap-2.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-600 text-lg font-extrabold text-white">X</div>
-          <span className="font-bold text-ink">XYZ HRMS</span>
+        <div className="mb-6">
+          <BrandLogo variant="full" className="h-9" />
         </div>
 
         {done ? (

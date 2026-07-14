@@ -45,21 +45,21 @@
   .badge-neutral { @apply badge bg-slate-100 text-slate-600; }
 }
 
-/* ---- AG Grid (Quartz) themed to the orange + grey palette ---- */
+/* ---- AG Grid (Quartz) themed to Mirus orange + grey ---- */
 .ag-theme-quartz {
   --ag-font-family: 'Inter', system-ui, sans-serif;
   --ag-font-size: 13px;
-  --ag-foreground-color: #1F2937;
+  --ag-foreground-color: #2D2D2D;
   --ag-background-color: #ffffff;
-  --ag-header-background-color: #FFF7ED;
-  --ag-header-foreground-color: #C2410C;
-  --ag-border-color: #E5E7EB;
-  --ag-row-border-color: #F3F4F6;
-  --ag-row-hover-color: #FFF7ED;
-  --ag-selected-row-background-color: #FFEDD5;
-  --ag-accent-color: #EA580C;
-  --ag-input-focus-border-color: #EA580C;
-  --ag-header-column-resize-handle-color: #CBD5E1;
+  --ag-header-background-color: #FFF8EB;
+  --ag-header-foreground-color: #C27800;
+  --ag-border-color: #E0E0E0;
+  --ag-row-border-color: #F0F0F0;
+  --ag-row-hover-color: #FFF8EB;
+  --ag-selected-row-background-color: #FFEFCC;
+  --ag-accent-color: #E89000;
+  --ag-input-focus-border-color: #E89000;
+  --ag-header-column-resize-handle-color: #B0B0B0;
   --ag-wrapper-border-radius: 12px;
   --ag-header-height: 46px;
   --ag-row-height: 52px;

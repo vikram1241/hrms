@@ -3,7 +3,7 @@ import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 
 /**
- * Thin wrapper around AG Grid (Quartz theme, teal-tuned in index.css).
+ * Thin wrapper around AG Grid (Quartz theme, orange+grey-tuned in index.css).
  * Provides sensible enterprise defaults: sortable + filterable columns,
  * resizing, and a quick-filter hook. Pass `quickFilter` text to filter across
  * all columns; column header menus give per-column filtering.

@@ -4,6 +4,8 @@ import { useNavigate, Navigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, ShieldCheck, Building2 } from 'lucide-react';
 import Button from '../components/ui/Button.jsx';
 import Input from '../components/ui/Input.jsx';
+import BrandLogo from '../components/ui/BrandLogo.jsx';
+import { APP_NAME, COMPANY_NAME } from '../config/brand.js';
 import { login, selectAuth } from '../features/auth/authSlice.js';
 
 // Remember the last company code so returning users don't retype it.
@@ -44,9 +46,8 @@ export default function Login() {
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-sidebar p-12 text-white lg:flex">
         <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-primary-600/30 blur-3xl" />
         <div className="absolute -bottom-32 -left-16 h-96 w-96 rounded-full bg-primary-500/20 blur-3xl" />
-        <div className="relative flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-600 text-xl font-extrabold">X</div>
-          <span className="text-lg font-bold">XYZ HRMS</span>
+        <div className="relative">
+          <BrandLogo variant="mark" on="dark" markClassName="h-11 w-11 rounded-xl bg-white p-1.5" className="gap-3" />
         </div>
         <div className="relative">
           <h1 className="text-4xl font-extrabold leading-tight">Manage your<br />workforce, end&#8209;to&#8209;end.</h1>
@@ -63,12 +64,11 @@ export default function Login() {
       <div className="flex w-full flex-col items-center justify-center bg-surface px-6 py-12 lg:w-1/2">
         <div className="w-full max-w-sm">
           <div className="mb-8 lg:hidden">
-            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-primary-600 text-xl font-extrabold text-white">X</div>
-            <span className="text-lg font-bold text-ink">XYZ HRMS</span>
+            <BrandLogo variant="full" className="h-10" />
           </div>
 
           <h2 className="text-2xl font-bold text-ink">Welcome back</h2>
-          <p className="mt-1 text-sm text-muted">Sign in to your HRMS portal.</p>
+          <p className="mt-1 text-sm text-muted">Sign in to your {APP_NAME} portal.</p>
 
           {error && (
             <div className="mt-5 rounded-lg border border-danger/20 bg-danger-soft px-4 py-3 text-sm font-medium text-danger">
@@ -78,14 +78,14 @@ export default function Login() {
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <Input
-              id="companySlug" type="text" label="Company code" placeholder="e.g. xyz" icon={Building2}
+              id="companySlug" type="text" label="Company code" placeholder="e.g. mirus" icon={Building2}
               value={form.companySlug}
               onChange={(e) => setForm({ ...form, companySlug: e.target.value })}
               onBlur={() => setTouched((t) => ({ ...t, companySlug: true }))}
               error={companyError} autoComplete="organization" autoFocus
             />
             <Input
-              id="email" type="email" label="Work email" placeholder="you@xyz.com" icon={Mail}
+              id="email" type="email" label="Work email" placeholder="you@mirus.com" icon={Mail}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               onBlur={() => setTouched((t) => ({ ...t, email: true }))}
@@ -108,7 +108,7 @@ export default function Login() {
             <Button type="submit" className="w-full" loading={submitting}>Sign in</Button>
           </form>
 
-          <p className="mt-8 text-center text-xs text-muted">© 2026 XYZ Software Solutions Pvt Ltd</p>
+          <p className="mt-8 text-center text-xs text-muted">© 2026 {COMPANY_NAME}</p>
         </div>
       </div>
     </div>

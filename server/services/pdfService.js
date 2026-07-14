@@ -38,7 +38,7 @@ export const generatePayslipPdf = async (slip) => {
   const text = (s, x, opts = {}) =>
     page.drawText(ascii(s), { x, y: opts.y ?? y, size: opts.size ?? 10, font: opts.bold ? bold : font, color: black });
 
-  text('XYZ Software Solutions', 40, { size: 18, bold: true });
+  text('Mirus Med Sciences', 40, { size: 18, bold: true });
   text(`Payslip for ${MONTHS[slip.month]} ${slip.year}`, 40, { y: 778, size: 12, bold: true });
   page.drawLine({ start: { x: 40, y: 770 }, end: { x: 555, y: 770 }, thickness: 1, color: black });
 
@@ -91,7 +91,7 @@ export const generateOfferLetterPdf = async ({ fullName, position, department, o
     y -= opts.gap ?? 18;
   };
 
-  line('XYZ Software Solutions', 40, { size: 18, bold: true, gap: 24 });
+  line('Mirus Med Sciences', 40, { size: 18, bold: true, gap: 24 });
   line('LETTER OF EMPLOYMENT OFFER', 40, { size: 13, bold: true, gap: 28 });
   line(`Date: ${new Date(offerDate).toDateString()}`);
   line(`Dear ${fullName},`, 40, { gap: 24 });

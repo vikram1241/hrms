@@ -8,6 +8,7 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import { formatINR } from '../../lib/money.js';
 import { payslipPdfUrl } from '../../api/payslips.js';
 import { MONTHS } from '../../config/constants.js';
+import { COMPANY_NAME } from '../../config/brand.js';
 
 const monthName = (m) => MONTHS.find((x) => x.value === m)?.label || m;
 
@@ -33,7 +34,7 @@ export default function SalarySlipPreview({ open, slip, onClose }) {
         <IconButton onClick={onClose} sx={{ position: 'absolute', right: 8, top: 8, color: '#fff', zIndex: 1 }} size="small"><X size={18} /></IconButton>
         {/* Letterhead */}
         <div className="bg-gradient-to-r from-primary-600 to-primary-800 px-6 py-5 text-center text-white">
-          <h2 className="text-lg font-bold">XYZ Software Solutions Pvt Ltd</h2>
+          <h2 className="text-lg font-bold">{COMPANY_NAME}</h2>
           <p className="text-sm text-primary-100">Salary Slip · {monthName(slip.month)} {slip.year}</p>
         </div>
       </div>

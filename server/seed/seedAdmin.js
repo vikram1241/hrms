@@ -66,7 +66,7 @@ const run = async () => {
 
   // Default company + admin.
   const companySlug = (process.env.SEED_COMPANY_SLUG || 'xyz').toLowerCase();
-  const companyName = process.env.SEED_COMPANY_NAME || 'XYZ Software Solutions';
+  const companyName = process.env.SEED_COMPANY_NAME || 'Mirus Med Sciences';
   const company = await upsertCompany(companySlug, companyName);
   await upsertUser(company, {
     email: (process.env.SEED_ADMIN_EMAIL || 'admin@xyz.com').toLowerCase(),
