@@ -11,8 +11,12 @@ export default function SidebarNav({ role, onNavigate, onLogout }) {
   return (
     <div className="flex h-full flex-col bg-sidebar text-slate-200">
       <div className="px-5 py-5">
-        <BrandLogo variant="mark" on="dark" markClassName="h-9 w-9 rounded-lg bg-white p-1" />
-        <p className="mt-1 pl-11 text-[11px] uppercase tracking-wide text-primary-300">{role} Portal</p>
+        <BrandLogo
+          variant="mark"
+          on="dark"
+          markClassName="h-12 w-12 rounded-xl bg-white p-1.5"
+          subtitle={`${role} Portal`}
+        />
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
