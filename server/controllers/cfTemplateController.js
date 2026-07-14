@@ -53,7 +53,13 @@ export const createCFTemplate = asyncHandler(async (req, res) => {
   }
   if (!name) throw new ApiError(400, 'name is required');
 
-  const payload = { type, name, description, active: true };
+  const payload = {
+    companyId: req.user.companyId,
+    type,
+    name,
+    description,
+    active: true
+  };
   if (req.file) {
     payload.fileUrl = cfTemplateRelPath(req.file.filename);
     payload.originalFileName = req.file.originalname;

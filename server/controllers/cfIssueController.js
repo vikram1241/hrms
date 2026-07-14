@@ -68,6 +68,7 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
   });
 
   const issue = await CFIssue.create({
+    companyId: req.user.companyId,
     templateId: template._id,
     type: template.type,
     templateName: template.name,
