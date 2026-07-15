@@ -12,7 +12,17 @@ const MAP = {
   paid: { cls: 'badge-success', label: 'Paid', dot: 'bg-success' },
   processing: { cls: 'badge-warning', label: 'Processing', dot: 'bg-warning' },
   verified: { cls: 'badge-success', label: 'Verified', dot: 'bg-success' },
-  rejected: { cls: 'badge-danger', label: 'Rejected', dot: 'bg-danger' }
+  rejected: { cls: 'badge-danger', label: 'Rejected', dot: 'bg-danger' },
+  // Attendance
+  present: { cls: 'badge-success', label: 'Present', dot: 'bg-success' },
+  absent: { cls: 'badge-danger', label: 'Absent', dot: 'bg-danger' },
+  'half-day': { cls: 'badge-warning', label: 'Half-Day', dot: 'bg-warning' },
+  leave: { cls: 'badge-info', label: 'Leave', dot: 'bg-info' },
+  holiday: { cls: 'badge-neutral', label: 'Holiday', dot: 'bg-slate-400' },
+  weekoff: { cls: 'badge-neutral', label: 'WeekOff', dot: 'bg-slate-400' },
+  // Leave request
+  approved: { cls: 'badge-success', label: 'Approved', dot: 'bg-success' },
+  cancelled: { cls: 'badge-neutral', label: 'Cancelled', dot: 'bg-slate-400' }
 };
 
 export default function StatusBadge({ status, label }) {

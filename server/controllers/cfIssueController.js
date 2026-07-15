@@ -6,7 +6,7 @@ import CFIssue from '../models/CFIssue.js';
 import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { fieldsForType, validateCFFields } from '../config/cfFields.js';
+import { fieldsForType, validateCFFields, applyCFFieldDefaults } from '../config/cfFields.js';
 import { generateCFAgreementPdf } from '../services/pdfService.js';
 import { sendCFAgreement } from '../services/emailService.js';
 
@@ -39,8 +39,6 @@ export const listCFIssues = asyncHandler(async (req, res) => {
  */
 export const createAndSendCFIssue = asyncHandler(async (req, res) => {
   const { templateId, fields: rawFields = {} } = req.body;
-  const fields = { ...rawFields };
-  if (req.body.recipientEmail) fields.recipientEmail = req.body.recipientEmail;
 
   if (!mongoose.isValidObjectId(templateId)) throw new ApiError(400, 'Valid templateId is required');
   const template = await CFTemplate.findById(templateId);
@@ -50,6 +48,10 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Template has no uploaded agreement file');
   }
 
+  const company = await Company.findById(req.user.companyId);
+  const fields = applyCFFieldDefaults({ ...rawFields }, company);
+  if (req.body.recipientEmail) fields.recipientEmail = req.body.recipientEmail;
+
   const missing = validateCFFields(template.type, fields);
   if (missing.length) throw new ApiError(400, `Missing required fields: ${missing.join(', ')}`);
 
@@ -58,7 +60,6 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'A valid recipientEmail is required');
   }
 
-  const company = await Company.findById(req.user.companyId);
   const pdfFileUrl = await generateCFAgreementPdf({
     type: template.type,
     fields,

@@ -16,7 +16,12 @@ const CompanySchema = new mongoose.Schema({
   // Branding + PDF-sealing assets (Epic C).
   branding: {
     logoUrl: { type: String, default: null },
+    /** Company letter header (image or PDF) drawn on every generated letter. */
     letterheadUrl: { type: String, default: null },
+    letterheadFileName: { type: String, trim: true },
+    /** Shared letter template/outline PDF used for all generated letters when set. */
+    letterOutlineUrl: { type: String, default: null },
+    letterOutlineFileName: { type: String, trim: true },
     // Pre-saved stamp + authorized-signatory signature baked onto issued PDFs.
     stampUrl: { type: String, default: null },
     signatureUrl: { type: String, default: null },
@@ -24,12 +29,16 @@ const CompanySchema = new mongoose.Schema({
     authorizedSignatoryDesignation: { type: String, trim: true }
   },
 
-  // Statutory registration numbers used on payslips / statutory registers (Epic C/16).
+  /** HR contact block printed on offer / appointment letters. */
+  hr: {
+    name: { type: String, trim: true },
+    designation: { type: String, trim: true },
+    contact: { type: String, trim: true },
+    email: { type: String, trim: true, lowercase: true }
+  },
+
+  // Statutory registration numbers (GSTIN / CIN shown in Company Settings).
   statutory: {
-    pfNumber: { type: String, trim: true },
-    esiNumber: { type: String, trim: true },
-    ptNumber: { type: String, trim: true },
-    tan: { type: String, trim: true },
     gstin: { type: String, trim: true },
     cin: { type: String, trim: true }
   },

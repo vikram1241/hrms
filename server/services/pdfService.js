@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { formatINR } from '../utils/money.js';
+import { paisaToWords } from '../utils/numberToWords.js';
 import ApiError from '../utils/ApiError.js';
 
 const ROOT = process.cwd();
@@ -23,6 +24,54 @@ const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
 const ascii = (s) => String(s ?? '').replace(/[^\x20-\xFF]/g, '');
 
 const relPath = (absPath) => path.relative(ROOT, absPath).split(path.sep).join('/');
+
+const loadImage = async (doc, relMaybe) => {
+  if (!relMaybe) return null;
+  const candidates = [
+    path.resolve(ROOT, relMaybe),
+    path.resolve(relMaybe),
+    path.resolve('/app', relMaybe)
+  ];
+  for (const abs of candidates) {
+    if (!fs.existsSync(abs)) continue;
+    try {
+      const bytes = await fsp.readFile(abs);
+      const lower = abs.toLowerCase();
+      if (lower.endsWith('.png')) return await doc.embedPng(bytes);
+      return await doc.embedJpg(bytes);
+    } catch {
+      /* try next path / format */
+    }
+  }
+  return null;
+};
+
+const wrapText = (str, max) => {
+  const words = ascii(str).split(/\s+/);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    if ((cur + ' ' + w).trim().length > max) { if (cur) lines.push(cur); cur = w; }
+    else cur = (cur + ' ' + w).trim();
+  }
+  if (cur) lines.push(cur);
+  return lines;
+};
+
+const formatOfferDate = (d) => {
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d || '');
+  return `${dt.getDate()} ${MONTHS[dt.getMonth() + 1]} ${dt.getFullYear()}`;
+};
+
+const firstNameOf = (fullName) => {
+  const parts = String(fullName || '').trim().split(/\s+/);
+  // Drop honorifics like Mr./Ms.
+  const cleaned = parts.filter((p) => !/^(mr|mrs|ms|miss|dr)\.?$/i.test(p));
+  return cleaned[0] || fullName || 'Candidate';
+};
+
+const amountCell = (paisa) => formatINR(paisa, { symbol: '', decimals: false }).trim();
 
 /**
  * Render a SalarySlip document to a print-ready A4 PDF.
@@ -77,39 +126,304 @@ export const generatePayslipPdf = async (slip) => {
 };
 
 /**
- * Render an offer letter PDF from offer details and the frozen salary breakdown.
+ * Render an offer letter PDF in the Mirus Med Sciences layout (Kamalakar sample):
+ * - Company letter header / logo (from Company Settings branding)
+ * - Faint logo watermark on every page
+ * - Footer with address + GSTIN/CIN
+ * - HR details block + Director stamp/signature from Company Settings
+ * - Salary table from the frozen breakdown of the salary structure template
+ *
  * @returns {Promise<string>} repo-relative path to the written file.
  */
-export const generateOfferLetterPdf = async ({ fullName, position, department, offerDate, joiningDate, breakdown, annualCTC }) => {
+export const generateOfferLetterPdf = async ({
+  fullName,
+  position,
+  department,
+  offerDate,
+  joiningDate,
+  breakdown,
+  annualCTC,
+  company,
+  candidateEmail = '',
+  phone = '',
+  city = '',
+  location = '',
+  acceptByDate = null,
+  bodyParagraphs = null
+}) => {
   const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const black = rgb(0.1, 0.1, 0.1);
-  let y = 800;
-  const line = (s, x = 40, opts = {}) => {
-    page.drawText(ascii(s), { x, y, size: opts.size ?? 11, font: opts.bold ? bold : font, color: black });
-    y -= opts.gap ?? 18;
+  const ink = rgb(0.12, 0.12, 0.14);
+  const muted = rgb(0.35, 0.35, 0.38);
+  const brand = rgb(0.12, 0.22, 0.45);
+  const headerBg = rgb(0.86, 0.92, 0.97);
+
+  const companyName = company?.name || 'Mirus Med Sciences Private Limited';
+  const addr = company?.address || {};
+  const addrLine = [
+    companyName,
+    [addr.street, addr.city, addr.state, addr.country || 'India', addr.zipCode].filter(Boolean).join(', ')
+  ].filter(Boolean).join(', ');
+  const statutoryBits = [
+    company?.statutory?.cin ? `CIN: ${company.statutory.cin}` : null,
+    company?.statutory?.gstin ? `GSTIN: ${company.statutory.gstin}` : null
+  ].filter(Boolean).join('; ');
+  const contactBits = [
+    company?.contactEmail || null,
+    company?.hr?.email || null
+  ].filter(Boolean).join('; ');
+
+  const jobLocation = location || [addr.city, addr.state].filter(Boolean).join(', ') || 'Hyderabad, Telangana';
+  const offerDt = offerDate || new Date();
+  const joinDt = joiningDate || offerDt;
+  const acceptDt = acceptByDate || joinDt;
+  const firstName = firstNameOf(fullName);
+
+  const logo = await loadImage(doc, company?.branding?.logoUrl);
+  const letterheadImg = await loadImage(doc, company?.branding?.letterheadUrl);
+  const stamp = await loadImage(doc, company?.branding?.stampUrl);
+  const sigImg = await loadImage(doc, company?.branding?.signatureUrl);
+
+  const hrName = (company?.hr?.name || '').trim();
+  const hrTitle = (company?.hr?.designation || '').trim();
+  const hrContact = (company?.hr?.contact || '').trim();
+  const hrEmail = (company?.hr?.email || company?.contactEmail || '').trim();
+  const directorName = (company?.branding?.authorizedSignatoryName || '').trim();
+  const directorTitle = (company?.branding?.authorizedSignatoryDesignation || 'Director').trim();
+
+  let page = doc.addPage([595, 842]);
+  let y = 780;
+
+  const drawWatermark = (p) => {
+    if (!logo) return;
+    const d = logo.scaleToFit(360, 360);
+    p.drawImage(logo, {
+      x: (595 - d.width) / 2,
+      y: (842 - d.height) / 2 - 20,
+      width: d.width,
+      height: d.height,
+      opacity: 0.12
+    });
   };
 
-  line('Mirus Med Sciences', 40, { size: 18, bold: true, gap: 24 });
-  line('LETTER OF EMPLOYMENT OFFER', 40, { size: 13, bold: true, gap: 28 });
-  line(`Date: ${new Date(offerDate).toDateString()}`);
-  line(`Dear ${fullName},`, 40, { gap: 24 });
-  line(`We are pleased to offer you the position of ${position} in our ${department} department.`);
-  line(`Your tentative date of joining is ${new Date(joiningDate).toDateString()}.`, 40, { gap: 24 });
-  line(`Annual CTC: ${formatINR(annualCTC)}`, 40, { bold: true, gap: 22 });
+  const drawHeader = (p) => {
+    if (letterheadImg) {
+      const d = letterheadImg.scaleToFit(520, 72);
+      p.drawImage(letterheadImg, {
+        x: (595 - d.width) / 2,
+        y: 842 - 14 - d.height,
+        width: d.width,
+        height: d.height
+      });
+      return 842 - 26 - d.height;
+    }
+    if (logo) {
+      const d = logo.scaleToFit(170, 64);
+      p.drawImage(logo, {
+        x: 595 - 40 - d.width,
+        y: 842 - 18 - d.height,
+        width: d.width,
+        height: d.height,
+        opacity: 1
+      });
+      return 842 - 30 - d.height;
+    }
+    p.drawText(ascii(companyName), { x: 280, y: 800, size: 12, font: bold, color: brand });
+    return 780;
+  };
 
-  line('Monthly Compensation Breakdown', 40, { bold: true });
-  (breakdown.earnings || []).forEach((e) => line(`  ${e.label}: ${formatINR(e.monthlyAmount)}`, 40, { size: 10, gap: 15 }));
-  line(`  Gross: ${formatINR(breakdown.grossEarnings)}`, 40, { size: 10, gap: 15 });
-  line(`  Total Deductions: ${formatINR(breakdown.totalDeductions)}`, 40, { size: 10, gap: 15 });
-  line(`  Net Take-Home (monthly): ${formatINR(breakdown.netTakeHome)}`, 40, { size: 10, bold: true, gap: 40 });
+  const drawFooter = (p) => {
+    p.drawRectangle({ x: 0, y: 0, width: 595, height: 46, color: brand });
+    const footer1 = ascii(addrLine);
+    const footer2 = ascii([statutoryBits, contactBits].filter(Boolean).join('  |  '));
+    p.drawText(footer1.slice(0, 115), { x: 28, y: 28, size: 6.5, font, color: rgb(1, 1, 1) });
+    if (footer2) p.drawText(footer2.slice(0, 120), { x: 28, y: 14, size: 6.5, font, color: rgb(1, 1, 1) });
+  };
 
-  line('To accept, please sign in the portal below.', 40, { gap: 60 });
-  // Reserve a labelled signature zone near the bottom for the e-sign baker.
-  page.drawText('Candidate Signature:', { x: 40, y: 120, size: 11, font: bold, color: black });
-  page.drawLine({ start: { x: 180, y: 118 }, end: { x: 400, y: 118 }, thickness: 1, color: black });
+  const decoratePage = (p) => {
+    drawWatermark(p);
+    const contentTop = drawHeader(p);
+    drawFooter(p);
+    return contentTop;
+  };
+
+  const newPage = () => {
+    page = doc.addPage([595, 842]);
+    y = decoratePage(page) - 12;
+  };
+
+  const ensure = (need = 60) => {
+    if (y < need + 50) newPage();
+  };
+
+  const write = (text, opts = {}) => {
+    const size = opts.size ?? 10;
+    const f = opts.bold ? bold : font;
+    const color = opts.color || ink;
+    const x = opts.x ?? 48;
+    const maxChars = opts.maxChars ?? 92;
+    const gap = opts.gap ?? (size + 5);
+    for (const ln of wrapText(text, maxChars)) {
+      ensure(size + 50);
+      page.drawText(ascii(ln), { x, y, size, font: f, color });
+      y -= gap;
+    }
+  };
+
+  y = decoratePage(page) - 8;
+
+  page.drawText(ascii(formatOfferDate(offerDt)), { x: 420, y, size: 10, font, color: ink });
+  y -= 22;
+
+  write(fullName, { bold: true, size: 11, gap: 14 });
+  if (phone) write(String(phone), { size: 10, gap: 13 });
+  if (candidateEmail) write(String(candidateEmail), { size: 10, gap: 13 });
+  if (city) write(city, { size: 10, gap: 18 });
+  else y -= 6;
+
+  write(`Dear ${firstName},`, { size: 11, gap: 16 });
+
+  const defaultParas = [
+    `We are pleased to extend this Offer of Employment for the position of ${position} in our organization, based at ${jobLocation}.`,
+    `We were impressed with your profile, experience, and the interview discussions. We believe your skills and enthusiasm will be a valuable addition to our ${department || 'team'}. As a ${position}, you will play a key role in delivering business outcomes and contributing to the achievement of targets in your assigned territory. This position offers good growth opportunities within the organization for high performers.`
+  ];
+  const paras = Array.isArray(bodyParagraphs) && bodyParagraphs.length
+    ? bodyParagraphs.map((p) => String(p)
+      .replace(/\{\{employeeName\}\}/g, fullName)
+      .replace(/\{\{designation\}\}/g, position)
+      .replace(/\{\{department\}\}/g, department || '')
+      .replace(/\{\{companyName\}\}/g, companyName)
+      .replace(/\{\{joiningDate\}\}/g, formatOfferDate(joinDt))
+      .replace(/\{\{offerDate\}\}/g, formatOfferDate(offerDt))
+      .replace(/\{\{ctc\}\}/g, formatINR(annualCTC))
+      .replace(/\{\{location\}\}/g, jobLocation))
+    : defaultParas;
+
+  for (const para of paras) {
+    write(para, { size: 10, gap: 13 });
+    y -= 6;
+  }
+
+  write('Key Terms of the Offer:', { bold: true, size: 11, gap: 16 });
+  write(`1. Date of Joining: on or before ${formatOfferDate(joinDt)}.`, { size: 10, gap: 14 });
+  write(`2. Location: ${jobLocation}.`, { size: 10, gap: 14 });
+  write(
+    `3. Compensation: Your compensation has been structured as per industry standards for the role of ${position}. It includes a competitive fixed component along with performance-linked incentives. The detailed breakup is as follows:`,
+    { size: 10, gap: 14 }
+  );
+  y -= 4;
+
+  ensure(160);
+  const tableX = 48;
+  const col2X = 420;
+  const tableW = 500;
+  const rowH = 18;
+
+  page.drawRectangle({ x: tableX, y: y - 4, width: tableW, height: rowH + 2, color: headerBg });
+  page.drawText('Particulars', { x: tableX + 8, y, size: 10, font: bold, color: ink });
+  page.drawText('Amount (INR)', { x: col2X, y, size: 10, font: bold, color: ink });
+  y -= rowH + 4;
+
+  for (const e of (breakdown?.earnings || [])) {
+    ensure(40);
+    page.drawText(ascii(e.label), { x: tableX + 8, y, size: 10, font, color: ink });
+    page.drawText(ascii(amountCell(e.monthlyAmount)), { x: col2X, y, size: 10, font, color: ink });
+    y -= rowH;
+  }
+
+  ensure(40);
+  page.drawText('Gross Month Salary', { x: tableX + 8, y, size: 10, font: bold, color: ink });
+  page.drawText(ascii(amountCell(breakdown?.grossEarnings || 0)), { x: col2X, y, size: 10, font: bold, color: ink });
+  y -= rowH;
+
+  for (const d of (breakdown?.deductions || []).filter((x) =>
+    /pf|provident|esi|employer/i.test(`${x.key || ''} ${x.label || ''}`)
+  )) {
+    ensure(40);
+    page.drawText(ascii(d.label), { x: tableX + 8, y, size: 10, font, color: ink });
+    page.drawText(ascii(amountCell(d.monthlyAmount)), { x: col2X, y, size: 10, font, color: ink });
+    y -= rowH;
+  }
+
+  const monthlyCtc = Math.round(Number(annualCTC || 0) / 12);
+  ensure(40);
+  page.drawText('Total CTC (Monthly)', { x: tableX + 8, y, size: 10, font: bold, color: ink });
+  page.drawText(ascii(amountCell(monthlyCtc)), { x: col2X, y, size: 10, font: bold, color: ink });
+  y -= rowH;
+
+  ensure(40);
+  page.drawText('Incentives / Performance Bonus', { x: tableX + 8, y, size: 10, font, color: ink });
+  page.drawText('As per Company incentive scheme', { x: col2X - 40, y, size: 9, font, color: muted });
+  y -= rowH + 10;
+
+  write(
+    `Annual CTC (Cost to Company) will be approximately ${formatINR(annualCTC)} (${paisaToWords(annualCTC)}) subject to statutory deductions.`,
+    { bold: true, size: 10, gap: 14 }
+  );
+  write(
+    'Travel / Conveyance: Reimbursement of actual expenses as per Company policy (with supporting bills).',
+    { bold: true, size: 10, gap: 16 }
+  );
+
+  write('4. Probation Period: 6 (Six) months from the date of joining.', { size: 10, gap: 14 });
+  write('5. Other Conditions:', { size: 10, gap: 14 });
+  write('- This offer is subject to successful background verification and medical fitness test.', { size: 10, gap: 13, x: 56, maxChars: 88 });
+  write('- Your employment will be governed by the rules and policies of the Company.', { size: 10, gap: 13, x: 56, maxChars: 88 });
+  write('- You will be required to sign the standard Service Agreement / Confidentiality Agreement on joining.', { size: 10, gap: 16, x: 56, maxChars: 88 });
+
+  write(
+    `Please convey your acceptance by signing and returning the duplicate copy of this letter on or before ${formatOfferDate(acceptDt)}. Upon acceptance, we will issue the formal Appointment Letter.`,
+    { size: 10, gap: 16 }
+  );
+  write('We look forward to your positive response and a long, mutually beneficial association.', { size: 10, gap: 24 });
+
+  // Closing: HR details (left) + Director stamp/signature (right)
+  ensure(200);
+  const closeTop = y;
+
+  write('HR Details', { bold: true, size: 10, gap: 14 });
+  if (hrName) write(hrName, { bold: true, size: 10, gap: 13 });
+  if (hrTitle) write(hrTitle, { size: 10, gap: 12 });
+  if (hrContact) write(`Contact: ${hrContact}`, { size: 9, gap: 12, color: muted });
+  if (hrEmail) write(`Email: ${hrEmail}`, { size: 9, gap: 12, color: muted });
+  if (!hrName && !hrTitle && !hrContact && !hrEmail) {
+    write('(Configure HR Name, Designation, Contact and Email in Company Settings)', { size: 8, gap: 12, color: muted });
+  }
+
+  const sealY = closeTop - 10;
+  if (sigImg) {
+    const d = sigImg.scaleToFit(150, 52);
+    page.drawImage(sigImg, { x: 360, y: sealY - d.height, width: d.width, height: d.height });
+  }
+  if (stamp) {
+    const d = stamp.scaleToFit(95, 95);
+    page.drawImage(stamp, {
+      x: 470,
+      y: sealY - d.height - (sigImg ? 8 : 0),
+      width: d.width,
+      height: d.height,
+      opacity: 0.92
+    });
+  }
+  page.drawText(ascii(directorName || 'Authorized Signatory'), {
+    x: 360, y: sealY - 70, size: 9, font: bold, color: ink
+  });
+  page.drawText(ascii(directorTitle), {
+    x: 360, y: sealY - 84, size: 8, font, color: muted
+  });
+
+  y = Math.min(y, sealY - 110);
+
+  ensure(150);
+  write('Acceptance of Offer', { bold: true, size: 11, gap: 16 });
+  write('I have read and understood the terms of the Offer and hereby accept the same.', { size: 10, gap: 20 });
+  page.drawText(ascii(`Name: ${fullName}`), { x: 48, y, size: 10, font, color: ink });
+  y -= 22;
+  page.drawText('Date: ____________________', { x: 48, y, size: 10, font, color: ink });
+  y -= 28;
+  page.drawText('Candidate Signature:', { x: 48, y, size: 10, font: bold, color: ink });
+  page.drawLine({ start: { x: 180, y: y - 2 }, end: { x: 400, y: y - 2 }, thickness: 1, color: ink });
 
   const file = path.join(OFFER_DIR, `offer-${crypto.randomUUID()}.pdf`);
   await fsp.writeFile(file, await doc.save());
@@ -135,13 +449,14 @@ export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { nam
 
   const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
   const png = await doc.embedPng(pngBytes);
-  const page = doc.getPages()[0];
+  const pages = doc.getPages();
+  const page = pages[pages.length - 1];
   const dims = png.scaleToFit(180, 60);
-  page.drawImage(png, { x: 185, y: 122, width: dims.width, height: dims.height });
+  page.drawImage(png, { x: 185, y: 70, width: dims.width, height: dims.height });
 
   const font = await doc.embedFont(StandardFonts.Helvetica);
   page.drawText(ascii(`Signed by ${name} on ${new Date(signedAt).toISOString()}`), {
-    x: 40, y: 100, size: 8, font, color: rgb(0.3, 0.3, 0.3)
+    x: 48, y: 55, size: 8, font, color: rgb(0.3, 0.3, 0.3)
   });
 
   const file = path.join(SIGNED_OFFER_DIR, `signed-${crypto.randomUUID()}.pdf`);
@@ -149,28 +464,8 @@ export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { nam
   return relPath(file);
 };
 
+
 // --- Epic 10: company-sealed statutory document generation ---
-
-const loadImage = async (doc, relMaybe) => {
-  if (!relMaybe) return null;
-  const abs = path.resolve(ROOT, relMaybe);
-  if (!fs.existsSync(abs)) return null;
-  const bytes = await fsp.readFile(abs);
-  return abs.toLowerCase().endsWith('.png') ? doc.embedPng(bytes) : doc.embedJpg(bytes);
-};
-
-// Naive word-wrap for body paragraphs at a given width (in chars ~ points/6).
-const wrapText = (str, max) => {
-  const words = ascii(str).split(/\s+/);
-  const lines = [];
-  let cur = '';
-  for (const w of words) {
-    if ((cur + ' ' + w).trim().length > max) { if (cur) lines.push(cur); cur = w; }
-    else cur = (cur + ' ' + w).trim();
-  }
-  if (cur) lines.push(cur);
-  return lines;
-};
 
 /**
  * Generate a company-issued statutory document (appointment letter, NDA,
@@ -193,9 +488,19 @@ export const generateCompanyDocPdf = async ({ title, paragraphs, company, employ
   };
 
   const companyName = company?.name || 'Company';
+  const letterheadImg = await loadImage(doc, company?.branding?.letterheadUrl);
   const logo = await loadImage(doc, company?.branding?.logoUrl);
-  if (logo) { const d = logo.scaleToFit(120, 48); page.drawImage(logo, { x: 40, y: 792, width: d.width, height: d.height }); }
-  write(companyName, logo ? 170 : 40, { size: 18, bold: true, gap: 26 });
+  if (letterheadImg) {
+    const d = letterheadImg.scaleToFit(520, 56);
+    page.drawImage(letterheadImg, { x: (595 - d.width) / 2, y: 842 - 18 - d.height, width: d.width, height: d.height });
+    y = 842 - 28 - d.height - 12;
+  } else if (logo) {
+    const d = logo.scaleToFit(120, 48);
+    page.drawImage(logo, { x: 40, y: 792, width: d.width, height: d.height });
+    write(companyName, 170, { size: 18, bold: true, gap: 26 });
+  } else {
+    write(companyName, 40, { size: 18, bold: true, gap: 26 });
+  }
   write(title.toUpperCase(), 40, { size: 13, bold: true, gap: 26 });
   write(`Date: ${new Date(effectiveDate || Date.now()).toDateString()}`);
   if (employeeName) write(`To: ${employeeName}${designation ? `, ${designation}` : ''}`, 40, { gap: 24 });
@@ -203,6 +508,15 @@ export const generateCompanyDocPdf = async ({ title, paragraphs, company, employ
   for (const para of paragraphs || []) {
     for (const ln of wrapText(para, 95)) write(ln, 40, { size: 10, gap: 15 });
     y -= 8;
+  }
+
+  // HR details (when configured) above the authorized seal.
+  const hrName = company?.hr?.name;
+  if (hrName) {
+    write(hrName, 40, { size: 10, bold: true, gap: 14 });
+    if (company.hr.designation) write(company.hr.designation, 40, { size: 9, gap: 12 });
+    if (company.hr.contact) write(company.hr.contact, 40, { size: 9, gap: 12 });
+    if (company.hr.email) write(company.hr.email, 40, { size: 9, gap: 16 });
   }
 
   // Seal: stamp (right) + signature (left) near the bottom.
@@ -219,6 +533,116 @@ export const generateCompanyDocPdf = async ({ title, paragraphs, company, employ
   const file = path.join(GENERATED_DOC_DIR, `doc-${crypto.randomUUID()}.pdf`);
   await fsp.writeFile(file, await doc.save());
   return relPath(file);
+};
+
+/**
+ * Bake company logo/stamp/signature onto the last page of an existing PDF.
+ * Used after AcroForm fill so every issued letter carries the company seal.
+ * @returns {Promise<string>} repo-relative path to sealed copy
+ */
+export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENERATED_DOC_DIR } = {}) => {
+  const sourceAbs = path.resolve(ROOT, sourceRelPath);
+  if (!fs.existsSync(sourceAbs)) throw new ApiError(404, 'Source PDF not found');
+
+  const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
+  const pages = doc.getPages();
+  const page = pages[pages.length - 1];
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const black = rgb(0.1, 0.1, 0.1);
+
+  const stamp = await loadImage(doc, company?.branding?.stampUrl);
+  if (stamp) {
+    const d = stamp.scaleToFit(100, 100);
+    page.drawImage(stamp, { x: 420, y: 80, width: d.width, height: d.height, opacity: 0.9 });
+  }
+  const sig = await loadImage(doc, company?.branding?.signatureUrl);
+  if (sig) {
+    const d = sig.scaleToFit(150, 50);
+    page.drawImage(sig, { x: 40, y: 110, width: d.width, height: d.height });
+  }
+  if (company?.branding?.authorizedSignatoryName || sig || stamp) {
+    page.drawLine({ start: { x: 40, y: 105 }, end: { x: 220, y: 105 }, thickness: 1, color: black });
+    page.drawText(ascii(`Authorized Signatory: ${company?.branding?.authorizedSignatoryName || ''}`), {
+      x: 40, y: 90, size: 9, font, color: black
+    });
+    if (company?.branding?.authorizedSignatoryDesignation) {
+      page.drawText(ascii(company.branding.authorizedSignatoryDesignation), {
+        x: 40, y: 76, size: 8, font, color: rgb(0.3, 0.3, 0.3)
+      });
+    }
+  }
+
+  const file = path.join(destDir, `sealed-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(file, await doc.save());
+  return relPath(file);
+};
+
+/**
+ * Generate a letter from a LetterTemplate (C&F-style).
+ * Prefers AcroForm fill on the uploaded PDF; otherwise renders bodyParagraphs
+ * (or a sensible default) and always applies the company seal.
+ */
+export const generateLetterFromTemplate = async ({
+  template,
+  fields = {},
+  company,
+  destDir = OFFER_DIR
+}) => {
+  const title = template?.title || template?.name || 'Letter';
+  const companyName = company?.name || fields.companyName || 'Company';
+  const merged = {
+    companyName,
+    hrName: company?.hr?.name || '',
+    hrDesignation: company?.hr?.designation || '',
+    hrContact: company?.hr?.contact || '',
+    hrEmail: company?.hr?.email || '',
+    ...fields
+  };
+
+  // Prefer type-specific template file; else company-wide letter outline/template.
+  const sourceFile = template?.fileUrl || company?.branding?.letterOutlineUrl || null;
+
+  if (sourceFile && (await pdfHasAcroForms(sourceFile))) {
+    const filled = await fillAcroFormPdf(sourceFile, merged);
+    const sealed = await applyCompanySeal(filled, company, { destDir });
+    try { await fsp.unlink(path.resolve(ROOT, filled)); } catch { /* ignore */ }
+    return sealed;
+  }
+
+  // Text fallback: substitute placeholders in body paragraphs, or minimal default copy.
+  let paragraphs = Array.isArray(template?.bodyParagraphs) ? [...template.bodyParagraphs] : [];
+  if (!paragraphs.length) {
+    paragraphs = [
+      `Dear ${merged.employeeName || 'Candidate'},`,
+      `This letter confirms your ${merged.designation || 'appointment'} with ${companyName}`
+        + (merged.department ? ` in the ${merged.department} department` : '')
+        + (merged.joiningDate ? `, effective ${merged.joiningDate}` : '')
+        + '.',
+      merged.ctc ? `Annual CTC: ${merged.ctc}.` : '',
+      'Please retain this letter for your records.'
+    ].filter(Boolean);
+  } else {
+    paragraphs = paragraphs.map((p) =>
+      String(p).replace(/\{\{(\w+)\}\}/g, (_, key) => String(merged[key] ?? '').trim() || `{{${key}}}`)
+    );
+  }
+
+  const generated = await generateCompanyDocPdf({
+    title,
+    paragraphs,
+    company,
+    employeeName: merged.employeeName,
+    designation: merged.designation,
+    effectiveDate: merged.date || merged.offerDate || merged.joiningDate || Date.now()
+  });
+
+  // generateCompanyDocPdf already seals; move into destDir when different.
+  if (destDir === GENERATED_DOC_DIR) return generated;
+  const bytes = await fsp.readFile(path.resolve(ROOT, generated));
+  const dest = path.join(destDir, `letter-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(dest, bytes);
+  try { await fsp.unlink(path.resolve(ROOT, generated)); } catch { /* ignore */ }
+  return relPath(dest);
 };
 
 /** Bake a drawn counter-signature (base64 PNG) onto a generated document. */

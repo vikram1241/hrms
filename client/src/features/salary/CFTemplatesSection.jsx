@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
-import { Plus, Pencil, Trash2, FileText, Download, Upload, Truck } from 'lucide-react';
+import { Plus, Pencil, Trash2, FileText, Eye, Upload, Truck } from 'lucide-react';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Spinner from '../../components/ui/Spinner.jsx';
@@ -57,7 +57,6 @@ export default function CFTemplatesSection() {
   const save = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) return dispatch(notifyError('Template name is required.'));
-    if (!form._id && !form.file) return dispatch(notifyError('Upload a PDF or Word agreement file.'));
 
     setBusy(true);
     const fd = new FormData();
@@ -97,7 +96,7 @@ export default function CFTemplatesSection() {
   return (
     <div>
       <p className="mb-4 text-sm text-muted">
-        Manage Clearing &amp; Forwarding agreement templates by partner type. Upload PDF (or Word) sample agreements for Agents, Distributors and Wholesalers.
+        Manage Clearing &amp; Forwarding agreement templates by partner type. Seed defaults are available after setup; upload a PDF to customize. At issue time you only need party details — other blanks are prefilled.
       </p>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -124,7 +123,7 @@ export default function CFTemplatesSection() {
                       <div className="flex shrink-0 gap-0.5">
                         {t.hasFile && (
                           <a className="btn-ghost p-1.5 text-primary-600" href={cfTemplateFileUrl(t._id)} target="_blank" rel="noreferrer" title="View file">
-                            <Download size={14} />
+                            <Eye size={14} />
                           </a>
                         )}
                         <button type="button" className="btn-ghost p-1.5" onClick={() => openEdit(t)} title="Edit"><Pencil size={14} /></button>
@@ -193,7 +192,7 @@ export default function CFTemplatesSection() {
                 hidden
                 onChange={(e) => setForm({ ...form, file: e.target.files?.[0] || null })}
               />
-              <p className="mt-2 text-xs text-muted">Max 15 MB. Leave blank when editing to keep the existing file.</p>
+              <p className="mt-2 text-xs text-muted">Max 15 MB. Optional — without a file, the system generates a standard agreement from filled party details. Leave blank when editing to keep the existing file.</p>
             </div>
           </div>
         )}

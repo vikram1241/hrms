@@ -9,7 +9,11 @@ import { listTemplates } from '../../api/salary.js';
 import { DEPARTMENTS } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
-const blank = { candidateEmail: '', fullName: '', position: '', department: '', joiningDate: '', offerDate: '', templateId: '', annualCTC: '' };
+const blank = {
+  candidateEmail: '', fullName: '', position: '', department: '',
+  joiningDate: '', offerDate: '', templateId: '', annualCTC: '',
+  phone: '', city: '', location: ''
+};
 
 export default function CreateOfferDialog({ open, onClose, onSaved }) {
   const dispatch = useDispatch();
@@ -31,6 +35,9 @@ export default function CreateOfferDialog({ open, onClose, onSaved }) {
     try {
       const payload = { ...form, annualCTC: Number(form.annualCTC) };
       if (!payload.offerDate) delete payload.offerDate;
+      if (!payload.phone) delete payload.phone;
+      if (!payload.city) delete payload.city;
+      if (!payload.location) delete payload.location;
       const res = await createOffer(payload);
       dispatch(notifySuccess('Offer staged and emailed to the candidate.'));
       onSaved?.(res);
@@ -48,7 +55,10 @@ export default function CreateOfferDialog({ open, onClose, onSaved }) {
       <div className="grid grid-cols-1 gap-4 pt-1 sm:grid-cols-2">
         <TextField label="Full Name" value={form.fullName} onChange={set('fullName')} fullWidth required />
         <TextField label="Candidate Email" type="email" value={form.candidateEmail} onChange={set('candidateEmail')} fullWidth required />
+        <TextField label="Phone" value={form.phone} onChange={set('phone')} fullWidth />
+        <TextField label="City / Address" value={form.city} onChange={set('city')} fullWidth placeholder="e.g. Hyderabad, PIN Code: 500090" />
         <TextField label="Position" value={form.position} onChange={set('position')} fullWidth required />
+        <TextField label="Job Location" value={form.location} onChange={set('location')} fullWidth placeholder="e.g. Hyderabad, Telangana" />
         <TextField label="Department" value={form.department} onChange={set('department')} select fullWidth required>
           {DEPARTMENTS.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
         </TextField>

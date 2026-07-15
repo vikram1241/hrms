@@ -6,7 +6,8 @@ import User from '../models/User.js';
 import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { generateCompanyDocPdf, bakeSignatureOnDoc } from '../services/pdfService.js';
+import { generateCompanyDocPdf, bakeSignatureOnDoc, generateLetterFromTemplate, GENERATED_DOC_DIR } from '../services/pdfService.js';
+import { resolveDefaultLetterTemplate } from './letterTemplateController.js';
 
 const fullName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
 
@@ -69,26 +70,54 @@ export const issueDocument = asyncHandler(async (req, res) => {
     effectiveDate: effectiveDate || Date.now()
   };
 
-  const pdfFileUrl = await generateCompanyDocPdf({
-    title: tpl.title,
-    paragraphs: tpl.paragraphs(ctx),
-    company,
-    employeeName: ctx.employeeName,
-    designation: ctx.designation,
-    effectiveDate: ctx.effectiveDate
-  });
+  // Prefer a uploaded LetterTemplate when issuing AppointmentLetter (C&F-style fill + seal).
+  let pdfFileUrl;
+  let title = tpl.title;
+  let requiresSignature = tpl.requiresSignature;
+
+  if (type === 'AppointmentLetter') {
+    const letterTpl = await resolveDefaultLetterTemplate('AppointmentLetter');
+    if (letterTpl) {
+      title = letterTpl.title || letterTpl.name || tpl.title;
+      pdfFileUrl = await generateLetterFromTemplate({
+        template: letterTpl,
+        fields: {
+          employeeName: ctx.employeeName,
+          designation: ctx.designation || '',
+          department: user.employeeDetails?.department || '',
+          employeeId: user.employeeDetails?.employeeId || '',
+          joiningDate: new Date(ctx.effectiveDate).toDateString(),
+          date: new Date(ctx.effectiveDate).toDateString(),
+          companyName: ctx.companyName
+        },
+        company,
+        destDir: GENERATED_DOC_DIR
+      });
+    }
+  }
+
+  if (!pdfFileUrl) {
+    pdfFileUrl = await generateCompanyDocPdf({
+      title: tpl.title,
+      paragraphs: tpl.paragraphs(ctx),
+      company,
+      employeeName: ctx.employeeName,
+      designation: ctx.designation,
+      effectiveDate: ctx.effectiveDate
+    });
+  }
 
   const doc = await EmployeeDocument.create({
     userId: user._id,
     type,
-    title: tpl.title,
+    title,
     inputs: { effectiveDate: ctx.effectiveDate, designation: ctx.designation },
     pdfFileUrl,
-    requiresSignature: tpl.requiresSignature,
+    requiresSignature,
     issuedBy: req.user._id
   });
 
-  res.status(201).json({ success: true, message: `${tpl.title} issued`, document: doc });
+  res.status(201).json({ success: true, message: `${title} issued`, document: doc });
 });
 
 /** GET /api/employee-docs/mine — the caller's issued documents. */

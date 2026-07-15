@@ -1,6 +1,9 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import Company, { presentCompany } from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { COMPANY_ASSET_DIR } from '../middleware/uploadCompanyAsset.js';
 
 // Company is the tenant root (not tenant-scoped) — always resolve via the
 // caller's own companyId so a tenant can only read/write its own config.
@@ -16,7 +19,7 @@ export const getCompany = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, company: presentCompany(company) });
 });
 
-/** PUT /api/company — update branding, statutory, address and mail (Epic C). */
+/** PUT /api/company — update branding, HR, statutory, address and mail (Epic C). */
 export const updateCompany = asyncHandler(async (req, res) => {
   const company = await loadOwnCompany(req);
   const b = req.body;
@@ -29,8 +32,14 @@ export const updateCompany = asyncHandler(async (req, res) => {
       if (b.branding[k] !== undefined) company.branding[k] = b.branding[k];
     });
   }
+  if (b.hr) {
+    if (!company.hr) company.hr = {};
+    ['name', 'designation', 'contact', 'email'].forEach((k) => {
+      if (b.hr[k] !== undefined) company.hr[k] = b.hr[k];
+    });
+  }
   if (b.statutory) {
-    ['pfNumber', 'esiNumber', 'ptNumber', 'tan', 'gstin', 'cin'].forEach((k) => {
+    ['gstin', 'cin'].forEach((k) => {
       if (b.statutory[k] !== undefined) company.statutory[k] = b.statutory[k];
     });
   }
@@ -51,8 +60,6 @@ export const updateCompany = asyncHandler(async (req, res) => {
       }
       company.mail.smtpPort = port;
     }
-    // Only overwrite the password when the client sends a non-empty value.
-    // Empty / omitted keeps the existing secret (UI uses a blank "leave unchanged" field).
     if (typeof b.mail.smtpPass === 'string' && b.mail.smtpPass.trim()) {
       company.mail.smtpPass = b.mail.smtpPass.trim();
     }
@@ -66,20 +73,62 @@ export const updateCompany = asyncHandler(async (req, res) => {
   });
 });
 
-const ASSET_KINDS = { logo: 'logoUrl', letterhead: 'letterheadUrl', stamp: 'stampUrl', signature: 'signatureUrl' };
+const ASSET_KINDS = {
+  logo: { url: 'logoUrl' },
+  letterhead: { url: 'letterheadUrl', fileName: 'letterheadFileName' },
+  letterOutline: { url: 'letterOutlineUrl', fileName: 'letterOutlineFileName' },
+  stamp: { url: 'stampUrl' },
+  signature: { url: 'signatureUrl' }
+};
 
 /**
- * POST /api/company/asset/:kind — upload a branding asset (logo | letterhead |
- * stamp | signature). Stamp + signature are baked onto issued PDFs (Epic 10).
+ * POST /api/company/asset/:kind — upload a branding asset
+ * (logo | letterhead | letterOutline | stamp | signature).
  */
 export const uploadCompanyBrandingAsset = asyncHandler(async (req, res) => {
-  const field = ASSET_KINDS[req.params.kind];
-  if (!field) throw new ApiError(400, `Invalid asset kind. Use one of: ${Object.keys(ASSET_KINDS).join(', ')}`);
-  if (!req.file) throw new ApiError(400, 'No image uploaded (field "asset")');
+  const meta = ASSET_KINDS[req.params.kind];
+  if (!meta) throw new ApiError(400, `Invalid asset kind. Use one of: ${Object.keys(ASSET_KINDS).join(', ')}`);
+  if (!req.file) throw new ApiError(400, 'No file uploaded (field "asset")');
 
   const company = await loadOwnCompany(req);
-  company.branding[field] = `uploads/company/${req.file.filename}`;
+  if (!company.branding) company.branding = {};
+  company.branding[meta.url] = `uploads/company/${req.file.filename}`;
+  if (meta.fileName) company.branding[meta.fileName] = req.file.originalname;
   await company.save();
 
-  res.status(200).json({ success: true, message: `${req.params.kind} updated`, url: company.branding[field] });
+  res.status(200).json({
+    success: true,
+    message: `${req.params.kind} updated`,
+    url: company.branding[meta.url],
+    fileName: meta.fileName ? company.branding[meta.fileName] : undefined
+  });
+});
+
+/**
+ * GET /api/company/asset/:kind — stream a branding asset for preview (auth required).
+ */
+export const getCompanyBrandingAsset = asyncHandler(async (req, res) => {
+  const meta = ASSET_KINDS[req.params.kind];
+  if (!meta) throw new ApiError(400, `Invalid asset kind. Use one of: ${Object.keys(ASSET_KINDS).join(', ')}`);
+
+  const company = await loadOwnCompany(req);
+  const rel = company.branding?.[meta.url];
+  if (!rel) throw new ApiError(404, `No ${req.params.kind} uploaded`);
+
+  const abs = path.resolve(rel);
+  if (!abs.startsWith(COMPANY_ASSET_DIR) || !fs.existsSync(abs)) {
+    throw new ApiError(404, `${req.params.kind} file missing on disk`);
+  }
+
+  const ext = path.extname(abs).toLowerCase();
+  const mime = ext === '.png' ? 'image/png'
+    : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : ext === '.pdf' ? 'application/pdf'
+        : 'application/octet-stream';
+  const downloadName = (meta.fileName && company.branding[meta.fileName])
+    || path.basename(abs);
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Content-Disposition', `inline; filename="${String(downloadName).replace(/"/g, '')}"`);
+  res.setHeader('Cache-Control', 'private, max-age=60');
+  fs.createReadStream(abs).pipe(res);
 });

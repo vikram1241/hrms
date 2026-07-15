@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
-import { Building2, Upload, Stamp, PenTool, Mail } from 'lucide-react';
+import Dialog from '@mui/material/Dialog';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import IconButton from '@mui/material/IconButton';
+import { Building2, Upload, Stamp, PenTool, Mail, Eye, X, UserRound, FileText, Image } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Spinner from '../../components/ui/Spinner.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { getCompany, updateCompany, uploadCompanyAsset } from '../../api/company.js';
+import { getCompany, updateCompany, uploadCompanyAsset, companyAssetUrl } from '../../api/company.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
-
-const asset = (url) => (url ? `/${url}` : null);
 
 const emptyMail = {
   smtpHost: 'smtp.gmail.com',
@@ -21,11 +23,16 @@ const emptyMail = {
   smtpPassSet: false
 };
 
+const emptyHr = { name: '', designation: '', contact: '', email: '' };
+
+const isPdfUrl = (url) => /\.pdf$/i.test(url || '');
+
 export default function CompanySettingsPage() {
   const dispatch = useDispatch();
   const { data: company, loading, reload } = useAsync(getCompany, []);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState(null); // { kind, label, isPdf }
 
   useEffect(() => {
     if (company) {
@@ -33,12 +40,13 @@ export default function CompanySettingsPage() {
         name: company.name || '',
         contactEmail: company.contactEmail || '',
         branding: { ...company.branding },
+        hr: { ...emptyHr, ...(company.hr || {}) },
         statutory: { ...company.statutory },
         address: { ...company.address },
         mail: {
           ...emptyMail,
           ...(company.mail || {}),
-          smtpPass: '' // never prefill secret; leave blank to keep existing
+          smtpPass: ''
         }
       });
     }
@@ -59,7 +67,6 @@ export default function CompanySettingsPage() {
     setSaving(true);
     try {
       const payload = structuredClone(form);
-      // Omit blank password so the server keeps the stored secret.
       if (!payload.mail?.smtpPass?.trim()) {
         if (payload.mail) delete payload.mail.smtpPass;
       }
@@ -80,30 +87,66 @@ export default function CompanySettingsPage() {
     } catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
 
-  // Plain render helpers (NOT components) so inputs keep focus across renders.
   const field = (label, path, rest = {}) => (
     <TextField size="small" fullWidth label={label} value={path.split('.').reduce((o, k) => o?.[k], form) ?? ''}
       onChange={(e) => set(path, e.target.value)} {...rest} />
   );
 
-  const assetUpload = (kind, label, url, Icon) => (
-    <div className="flex items-center gap-3 rounded-lg border border-line p-3">
-      <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded bg-surface">
-        {url ? <img src={asset(url)} alt={label} className="h-full w-full object-contain" /> : <Icon size={22} className="text-slate-400" />}
+  const openPreview = (kind, label, url) => {
+    if (!url) return;
+    if (isPdfUrl(url)) {
+      window.open(`${companyAssetUrl(kind)}?t=${Date.now()}`, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setPreview({ kind, label, isPdf: false });
+  };
+
+  const assetUpload = (kind, label, url, Icon, { accept = 'image/png,image/jpeg', hint } = {}) => {
+    const pdf = isPdfUrl(url);
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-line p-3">
+        <button
+          type="button"
+          className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-surface disabled:cursor-default"
+          disabled={!url}
+          onClick={() => openPreview(kind, label, url)}
+          title={url ? 'View' : undefined}
+        >
+          {url && !pdf
+            ? <img src={`${companyAssetUrl(kind)}?t=${encodeURIComponent(url)}`} alt={label} className="h-full w-full object-contain" />
+            : <Icon size={22} className={url ? 'text-primary-600' : 'text-slate-400'} />}
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-ink">{label}</p>
+          {url && (
+            <p className="truncate text-xs text-muted">
+              {form.branding[`${kind}FileName`] || (pdf ? 'PDF on file' : 'Image on file')}
+            </p>
+          )}
+          {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-primary-600 hover:underline">
+              <Upload size={13} /> {url ? 'Replace' : 'Upload'}
+              <input type="file" accept={accept} hidden onChange={(e) => upload(kind, e.target.files?.[0])} />
+            </label>
+            {url && (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:underline"
+                onClick={() => openPreview(kind, label, url)}
+              >
+                <Eye size={13} /> View
+              </button>
+            )}
+          </div>
+        </div>
       </div>
-      <div className="flex-1">
-        <p className="text-sm font-medium text-ink">{label}</p>
-        <label className="mt-1 inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-primary-600 hover:underline">
-          <Upload size={13} /> {url ? 'Replace' : 'Upload'} image
-          <input type="file" accept="image/png,image/jpeg" hidden onChange={(e) => upload(kind, e.target.files?.[0])} />
-        </label>
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div>
-      <PageHeader title="Company Settings" subtitle="Branding, mail (SMTP), statutory numbers and PDF seal assets"
+      <PageHeader title="Company Settings" subtitle="Branding, HR contacts, letter templates, mail and seal assets"
         actions={<Button onClick={save} loading={saving}>Save changes</Button>} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -122,10 +165,6 @@ export default function CompanySettingsPage() {
         <Card><CardBody>
           <h3 className="mb-3 text-base font-semibold text-ink">Statutory registration</h3>
           <div className="grid grid-cols-2 gap-3">
-            {field('PF Number', 'statutory.pfNumber')}
-            {field('ESI Number', 'statutory.esiNumber')}
-            {field('PT Number', 'statutory.ptNumber')}
-            {field('TAN', 'statutory.tan')}
             {field('GSTIN', 'statutory.gstin')}
             {field('CIN', 'statutory.cin')}
           </div>
@@ -160,6 +199,7 @@ export default function CompanySettingsPage() {
 
         <Card><CardBody>
           <h3 className="mb-3 text-base font-semibold text-ink">Authorized signatory</h3>
+          <p className="mb-3 text-xs text-muted">Director / authorized person whose signature and stamp seal issued PDFs.</p>
           <div className="space-y-3">
             {field('Signatory name', 'branding.authorizedSignatoryName')}
             {field('Signatory designation', 'branding.authorizedSignatoryDesignation')}
@@ -167,15 +207,67 @@ export default function CompanySettingsPage() {
         </CardBody></Card>
 
         <Card><CardBody>
+          <h3 className="mb-3 flex items-center gap-2 text-base font-semibold text-ink">
+            <UserRound size={18} className="text-primary-600" /> HR details
+          </h3>
+          <p className="mb-3 text-xs text-muted">Printed on offer and appointment letters as the HR contact block.</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {field('HR name', 'hr.name')}
+            {field('Designation', 'hr.designation', { placeholder: 'e.g. HR Manager' })}
+            {field('Contact', 'hr.contact', { placeholder: 'Phone number' })}
+            {field('Email', 'hr.email', { type: 'email' })}
+          </div>
+        </CardBody></Card>
+
+        <Card className="lg:col-span-2"><CardBody>
+          <h3 className="mb-1 flex items-center gap-2 text-base font-semibold text-ink">
+            <FileText size={18} className="text-primary-600" /> Company letter assets
+          </h3>
+          <p className="mb-3 text-xs text-muted">
+            Letter header and outline/template are applied to all generated letters (offers, appointments, and sealed docs).
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {assetUpload('letterhead', 'Company letter header', form.branding.letterheadUrl, Image, {
+              accept: 'image/png,image/jpeg,application/pdf,.pdf',
+              hint: 'Header banner image or PDF used at the top of every letter.'
+            })}
+            {assetUpload('letterOutline', 'Company letter template / outline', form.branding.letterOutlineUrl, FileText, {
+              accept: 'application/pdf,.pdf,image/png,image/jpeg',
+              hint: 'Shared outline PDF used as the base for generated letters when available.'
+            })}
+          </div>
+        </CardBody></Card>
+
+        <Card className="lg:col-span-2"><CardBody>
           <h3 className="mb-3 text-base font-semibold text-ink">Seal &amp; branding assets</h3>
-          <p className="mb-3 text-xs text-muted">Stamp &amp; signature are printed onto appointment letters, NDAs and other issued PDFs.</p>
-          <div className="space-y-3">
+          <p className="mb-3 text-xs text-muted">Logo, stamp and signature are printed onto issued PDFs. Click View to confirm uploads.</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             {assetUpload('logo', 'Company logo', form.branding.logoUrl, Building2)}
             {assetUpload('stamp', 'Company stamp', form.branding.stampUrl, Stamp)}
             {assetUpload('signature', 'Authorized signature', form.branding.signatureUrl, PenTool)}
           </div>
         </CardBody></Card>
       </div>
+
+      <Dialog open={Boolean(preview)} onClose={() => setPreview(null)} maxWidth="sm" fullWidth>
+        <DialogTitle className="flex items-center justify-between gap-2 pr-3">
+          <span>{preview?.label || 'Preview'}</span>
+          <IconButton size="small" onClick={() => setPreview(null)} aria-label="Close">
+            <X size={18} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {preview && (
+            <div className="flex min-h-[240px] items-center justify-center rounded-lg bg-surface p-4">
+              <img
+                src={`${companyAssetUrl(preview.kind)}?t=${Date.now()}`}
+                alt={preview.label}
+                className="max-h-[70vh] max-w-full object-contain"
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

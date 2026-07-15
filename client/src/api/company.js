@@ -7,3 +7,6 @@ export const uploadCompanyAsset = (kind, file) => {
   fd.append('asset', file);
   return api.post(`/company/asset/${kind}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
 };
+
+/** Authorized preview URL for a branding asset (logo | letterhead | letterOutline | stamp | signature). */
+export const companyAssetUrl = (kind) => `/api/company/asset/${kind}`;

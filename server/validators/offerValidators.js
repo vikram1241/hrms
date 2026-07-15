@@ -10,7 +10,11 @@ export const createOfferRules = [
   body('joiningDate').isISO8601().withMessage('joiningDate must be a valid date'),
   body('offerDate').optional().isISO8601().withMessage('offerDate must be a valid date'),
   body('templateId').isMongoId().withMessage('Valid templateId is required'),
-  body('annualCTC').isFloat({ gt: 0 }).withMessage('annualCTC must be a positive number (rupees)')
+  body('annualCTC').isFloat({ gt: 0 }).withMessage('annualCTC must be a positive number (rupees)'),
+  body('phone').optional().isString().trim(),
+  body('city').optional().isString().trim(),
+  body('location').optional().isString().trim(),
+  body('acceptByDate').optional().isISO8601().withMessage('acceptByDate must be a valid date')
 ];
 
 export const offerStatusRules = [

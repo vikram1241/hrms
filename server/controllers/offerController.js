@@ -16,6 +16,8 @@ import { upsertCandidateUser } from '../services/candidateService.js';
 import { provisionEmployee } from '../services/provisioningService.js';
 import { sendOfferInvite } from '../services/emailService.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
+import Company from '../models/Company.js';
+import { resolveDefaultLetterTemplate } from './letterTemplateController.js';
 
 const ACCESS_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const exposeToken = () => process.env.NODE_ENV !== 'production';
@@ -51,16 +53,37 @@ const createOfferCore = async (payload) => {
     { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true }
   );
 
+  const company = await Company.findById(user.companyId);
+  const letterTpl = await resolveDefaultLetterTemplate('OfferLetter');
+  const offerDt = offerDate || new Date();
+
+  // Always generate the Mirus-style offer PDF so the salary table comes from the
+  // salary structure template selected at create time (frozen breakdown).
+  // Letter template bodyParagraphs optionally override the common letter body.
   const pdfFileUrl = await generateOfferLetterPdf({
-    fullName, position, department,
-    offerDate: offerDate || new Date(),
-    joiningDate, breakdown, annualCTC: annualCTCPaisa
+    fullName,
+    position,
+    department,
+    offerDate: offerDt,
+    joiningDate,
+    breakdown,
+    annualCTC: annualCTCPaisa,
+    company,
+    candidateEmail: String(candidateEmail).toLowerCase().trim(),
+    phone: payload.phone || '',
+    city: payload.city || '',
+    location: payload.location || '',
+    acceptByDate: payload.acceptByDate || null,
+    bodyParagraphs: letterTpl?.bodyParagraphs || null
   });
 
   const { raw, hash } = generateToken();
   const offer = await OfferLetter.create({
     candidateEmail: String(candidateEmail).toLowerCase().trim(),
     fullName, position, department,
+    phone: payload.phone || '',
+    city: payload.city || '',
+    location: payload.location || '',
     offerDate: offerDate || new Date(),
     joiningDate,
     salaryAssignmentId: assignment._id,

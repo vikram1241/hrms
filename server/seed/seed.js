@@ -24,6 +24,7 @@ import EmployeeDocumentRecord from '../models/EmployeeDocumentRecord.js';
 import { TrainingSection, TrainingMedia } from '../models/trainingLibrary.js';
 import ExitRecord from '../models/ExitRecord.js';
 import CFTemplate from '../models/CFTemplate.js';
+import LetterTemplate from '../models/LetterTemplate.js';
 import { computeBreakdown } from '../utils/salaryEngine.js';
 import { rupeesToPaisa } from '../utils/money.js';
 import { paisaToWords } from '../utils/numberToWords.js';
@@ -31,6 +32,7 @@ import { generateToken } from '../utils/tokens.js';
 import { runWithStore } from '../utils/tenantContext.js';
 import { generatePayslipPdf, generateOfferLetterPdf, bakeSignatureOnOffer, generateCompanyDocPdf } from '../services/pdfService.js';
 import { CF_TEMPLATE_DIR, cfTemplateRelPath } from '../middleware/uploadCFTemplate.js';
+import { LETTER_TEMPLATE_DIR, letterTemplateRelPath } from '../middleware/uploadLetterTemplate.js';
 
 /**
  * Comprehensive multi-tenant demo seed — loads EVERY module with coherent data
@@ -130,7 +132,7 @@ const run = async () => {
   const company = await Company.create({
     slug: 'mirus', name: 'Mirus Med Sciences', status: 'active', contactEmail: 'hr@mirus.com',
     branding: { authorizedSignatoryName: 'Priya Sharma', authorizedSignatoryDesignation: 'HR Manager' },
-    statutory: { pfNumber: 'PF-KA-1234567', esiNumber: 'ESI-77-999', ptNumber: 'PT-KA-555', tan: 'BLRX01234C', gstin: '29ABCDE1234F1Z5' },
+    statutory: { gstin: '29ABCDE1234F1Z5', cin: 'U12345KA2020PTC000001' },
     address: addr(),
     // Prefer company-stored SMTP (Company Settings). Optionally hydrate from
     // env on first seed so local demo mail works without a manual UI step.
@@ -230,6 +232,7 @@ async function seedCompany(company) {
 
   await seedModules(company, employees);
   await seedCFTemplates();
+  await seedLetterTemplates();
 
   // --- Offers: one sent (live link) + one accepted ---
   const link = await seedOffers(engTpl);
@@ -418,6 +421,73 @@ async function seedCFTemplates() {
     mimeType: 'application/pdf',
     active: true
   });
+}
+
+async function seedLetterTemplates() {
+  fs.mkdirSync(LETTER_TEMPLATE_DIR, { recursive: true });
+
+  const defaults = [
+    {
+      type: 'OfferLetter',
+      name: 'Default Offer Letter',
+      title: 'Offer of Employment',
+      bodyParagraphs: [
+        'We are pleased to extend this Offer of Employment for the position of {{designation}} in our organization, based at {{location}}.',
+        'We were impressed with your profile, experience, and the interview discussions. We believe your skills and enthusiasm will be a valuable addition to our {{department}} team. As a {{designation}}, you will play a key role in promoting our products, building strong relationships with healthcare professionals, and contributing to the achievement of sales targets in your assigned territory. This position offers good growth opportunities within the organization for high performers.'
+      ]
+    },
+    {
+      type: 'AppointmentLetter',
+      name: 'Default Appointment Letter',
+      title: 'Letter of Appointment',
+      bodyParagraphs: [
+        'Dear {{employeeName}},',
+        'This letter confirms your appointment as {{designation}} at {{companyName}}, effective {{joiningDate}}.',
+        'Your employment is governed by the terms of your offer letter and company policies.'
+      ]
+    },
+    {
+      type: 'ServiceLetter',
+      name: 'Default Service Letter',
+      title: 'Service Certificate',
+      bodyParagraphs: [
+        'This is to certify that {{employeeName}} ({{employeeId}}) has been employed with {{companyName}} as {{designation}}.',
+        'Date of joining: {{joiningDate}}.'
+      ]
+    },
+    {
+      type: 'FNFLetter',
+      name: 'Default FNF Letter',
+      title: 'Full & Final Settlement',
+      bodyParagraphs: [
+        'Dear {{employeeName}},',
+        'Your full and final settlement with {{companyName}} is enclosed. Last working day: {{lastWorkingDay}}.'
+      ]
+    }
+  ];
+
+  for (const d of defaults) {
+    // Minimal blank PDF so View works out of the box; replace with branded letterhead anytime.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595, 842]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    page.drawText('Mirus Med Sciences', { x: 48, y: 780, size: 16, font: bold });
+    page.drawText(d.title, { x: 48, y: 750, size: 12, font: bold });
+    page.drawText('Upload a fillable letterhead PDF to replace this sample.', { x: 48, y: 720, size: 10, font });
+    const bytes = await doc.save();
+    const filename = `${crypto.randomUUID()}.pdf`;
+    await fsp.writeFile(path.join(LETTER_TEMPLATE_DIR, filename), bytes);
+
+    await LetterTemplate.create({
+      ...d,
+      fileUrl: letterTemplateRelPath(filename),
+      originalFileName: `${d.name}.pdf`,
+      mimeType: 'application/pdf',
+      isDefault: true,
+      active: true
+    });
+  }
 }
 
 async function buildWholesalerSamplePdf() {

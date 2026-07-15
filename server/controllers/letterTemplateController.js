@@ -1,37 +1,148 @@
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 import mongoose from 'mongoose';
-import LetterTemplate, { LETTER_TYPES, LETTER_PLACEHOLDERS } from '../models/LetterTemplate.js';
+import LetterTemplate, { LETTER_TYPES, LETTER_PLACEHOLDERS, LETTER_TYPE_LABELS } from '../models/LetterTemplate.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { LETTER_TEMPLATE_DIR, letterTemplateRelPath } from '../middleware/uploadLetterTemplate.js';
+import { fieldsForLetterType } from '../config/letterFields.js';
 
-/** GET /api/letter-templates?type= — list letter templates (optionally by type). */
+const present = (t) => {
+  const o = t.toObject ? t.toObject() : { ...t };
+  o.typeLabel = LETTER_TYPE_LABELS[o.type] || o.type;
+  o.hasFile = Boolean(o.fileUrl);
+  return o;
+};
+
+const unlinkQuiet = async (rel) => {
+  if (!rel) return;
+  try { await fsp.unlink(path.resolve(rel)); } catch { /* ignore */ }
+};
+
+const parseBool = (v, fallback = false) => {
+  if (v === undefined || v === null || v === '') return fallback;
+  return v === true || v === 'true' || v === '1';
+};
+
+/** Clear isDefault on other templates of the same type within the tenant. */
+const clearOtherDefaults = async (type, exceptId) => {
+  await LetterTemplate.updateMany(
+    { type, isDefault: true, ...(exceptId ? { _id: { $ne: exceptId } } : {}) },
+    { $set: { isDefault: false } }
+  );
+};
+
+/** GET /api/letter-templates?type=&active= */
 export const listLetterTemplates = asyncHandler(async (req, res) => {
   const filter = {};
-  if (req.query.type) filter.type = req.query.type;
-  const data = await LetterTemplate.find(filter).sort({ type: 1, name: 1 });
-  res.status(200).json({ success: true, data, meta: { types: LETTER_TYPES, placeholders: LETTER_PLACEHOLDERS } });
+  if (req.query.type) {
+    if (!LETTER_TYPES.includes(req.query.type)) {
+      throw new ApiError(400, `type must be one of: ${LETTER_TYPES.join(', ')}`);
+    }
+    filter.type = req.query.type;
+  }
+  if (req.query.active === 'true') filter.active = true;
+  if (req.query.active === 'false') filter.active = false;
+
+  const data = await LetterTemplate.find(filter).sort({ type: 1, isDefault: -1, name: 1 });
+  res.status(200).json({
+    success: true,
+    data: data.map(present),
+    meta: {
+      types: LETTER_TYPES,
+      typeLabels: LETTER_TYPE_LABELS,
+      placeholders: LETTER_PLACEHOLDERS,
+      fieldsByType: Object.fromEntries(LETTER_TYPES.map((t) => [t, fieldsForLetterType(t)]))
+    }
+  });
 });
 
-/** POST /api/letter-templates — create a letter template. */
+/**
+ * POST /api/letter-templates
+ * JSON or multipart: type, name, title?, bodyParagraphs?, isDefault?, file?
+ */
 export const createLetterTemplate = asyncHandler(async (req, res) => {
-  const { type, name, title, bodyParagraphs } = req.body;
+  const type = req.body.type;
+  const name = (req.body.name || '').trim();
+  const title = (req.body.title || '').trim();
+  let bodyParagraphs = req.body.bodyParagraphs;
+  if (typeof bodyParagraphs === 'string') {
+    try { bodyParagraphs = JSON.parse(bodyParagraphs); } catch { bodyParagraphs = bodyParagraphs.split('\n'); }
+  }
+  if (!Array.isArray(bodyParagraphs)) bodyParagraphs = [];
+
   if (!LETTER_TYPES.includes(type)) throw new ApiError(400, `type must be one of: ${LETTER_TYPES.join(', ')}`);
   if (!name) throw new ApiError(400, 'name is required');
-  const template = await LetterTemplate.create({
-    type, name, title, bodyParagraphs: Array.isArray(bodyParagraphs) ? bodyParagraphs : []
-  });
-  res.status(201).json({ success: true, message: 'Letter template created', template });
+
+  const isDefault = parseBool(req.body.isDefault, false);
+  if (isDefault) await clearOtherDefaults(type);
+
+  const payload = {
+    companyId: req.user.companyId,
+    type,
+    name,
+    title,
+    bodyParagraphs: bodyParagraphs.map((s) => String(s).trim()).filter(Boolean),
+    isDefault,
+    active: true
+  };
+  if (req.file) {
+    payload.fileUrl = letterTemplateRelPath(req.file.filename);
+    payload.originalFileName = req.file.originalname;
+    payload.mimeType = req.file.mimetype || 'application/pdf';
+  }
+
+  try {
+    const template = await LetterTemplate.create(payload);
+    res.status(201).json({ success: true, message: 'Letter template created', template: present(template) });
+  } catch (err) {
+    if (req.file) await unlinkQuiet(letterTemplateRelPath(req.file.filename));
+    if (err?.code === 11000) throw new ApiError(409, 'A template with this name already exists for this type');
+    throw err;
+  }
 });
 
-/** PUT /api/letter-templates/:id */
+/** PUT /api/letter-templates/:id — multipart optional file replace */
 export const updateLetterTemplate = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid template id');
   const template = await LetterTemplate.findById(req.params.id);
   if (!template) throw new ApiError(404, 'Letter template not found');
-  ['name', 'title', 'bodyParagraphs', 'active'].forEach((k) => {
-    if (req.body[k] !== undefined) template[k] = req.body[k];
-  });
-  await template.save();
-  res.status(200).json({ success: true, message: 'Letter template updated', template });
+
+  if (req.body.name !== undefined) template.name = String(req.body.name).trim();
+  if (req.body.title !== undefined) template.title = String(req.body.title).trim();
+  if (req.body.active !== undefined) template.active = parseBool(req.body.active, template.active);
+  if (req.body.bodyParagraphs !== undefined) {
+    let paras = req.body.bodyParagraphs;
+    if (typeof paras === 'string') {
+      try { paras = JSON.parse(paras); } catch { paras = paras.split('\n'); }
+    }
+    template.bodyParagraphs = Array.isArray(paras) ? paras.map((s) => String(s).trim()).filter(Boolean) : [];
+  }
+  if (req.body.isDefault !== undefined) {
+    const nextDefault = parseBool(req.body.isDefault, false);
+    if (nextDefault) await clearOtherDefaults(template.type, template._id);
+    template.isDefault = nextDefault;
+  }
+
+  const previousFile = template.fileUrl;
+  if (req.file) {
+    template.fileUrl = letterTemplateRelPath(req.file.filename);
+    template.originalFileName = req.file.originalname;
+    template.mimeType = req.file.mimetype || 'application/pdf';
+  }
+
+  try {
+    await template.save();
+  } catch (err) {
+    if (req.file) await unlinkQuiet(letterTemplateRelPath(req.file.filename));
+    if (err?.code === 11000) throw new ApiError(409, 'A template with this name already exists for this type');
+    throw err;
+  }
+
+  if (req.file && previousFile && previousFile !== template.fileUrl) await unlinkQuiet(previousFile);
+
+  res.status(200).json({ success: true, message: 'Letter template updated', template: present(template) });
 });
 
 /** DELETE /api/letter-templates/:id */
@@ -39,5 +150,33 @@ export const deleteLetterTemplate = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid template id');
   const template = await LetterTemplate.findByIdAndDelete(req.params.id);
   if (!template) throw new ApiError(404, 'Letter template not found');
+  await unlinkQuiet(template.fileUrl);
   res.status(200).json({ success: true, message: 'Letter template deleted' });
 });
+
+/** GET /api/letter-templates/:id/file — view uploaded template PDF */
+export const downloadLetterTemplateFile = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid template id');
+  const template = await LetterTemplate.findById(req.params.id);
+  if (!template) throw new ApiError(404, 'Letter template not found');
+  if (!template.fileUrl) throw new ApiError(404, 'No file uploaded for this template');
+
+  const abs = path.resolve(template.fileUrl);
+  if (!abs.startsWith(LETTER_TEMPLATE_DIR) || !fs.existsSync(abs)) {
+    throw new ApiError(404, 'Template file missing on disk');
+  }
+
+  res.setHeader('Content-Type', template.mimeType || 'application/pdf');
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename="${(template.originalFileName || 'letter-template.pdf').replace(/"/g, '')}"`
+  );
+  fs.createReadStream(abs).pipe(res);
+});
+
+/** Resolve default active letter template for a type (or first active). */
+export const resolveDefaultLetterTemplate = async (type) => {
+  let tpl = await LetterTemplate.findOne({ type, active: true, isDefault: true });
+  if (!tpl) tpl = await LetterTemplate.findOne({ type, active: true }).sort({ createdAt: 1 });
+  return tpl;
+};

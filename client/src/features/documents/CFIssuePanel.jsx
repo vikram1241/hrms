@@ -90,7 +90,7 @@ export default function CFIssuePanel() {
             <Truck size={18} className="text-primary-600" /> Generate &amp; send C&amp;F agreement
           </h3>
           <p className="mb-4 text-sm text-muted">
-            Select a template, then fill the blank fields in a form and email the generated PDF.
+            Select a template, fill party details (name, address, territory, email), then generate and email. Date, place and margin default automatically when left blank.
           </p>
 
           <div className="space-y-3">

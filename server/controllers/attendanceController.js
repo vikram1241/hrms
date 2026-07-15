@@ -46,11 +46,21 @@ export const markMyAttendance = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, message: 'Attendance recorded', record });
 });
 
-/** GET /api/attendance/mine?month&year — the caller's attendance. */
+/** GET /api/attendance/mine?month&year&from&to — the caller's attendance. */
 export const listMyAttendance = asyncHandler(async (req, res) => {
   const filter = { userId: req.user._id };
   const range = monthRange(req.query.month, req.query.year);
-  if (range) filter.date = range;
+  if (range) {
+    filter.date = range;
+  } else if (req.query.from || req.query.to) {
+    filter.date = {};
+    if (req.query.from) filter.date.$gte = new Date(req.query.from);
+    if (req.query.to) {
+      const to = new Date(req.query.to);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to))) to.setUTCHours(23, 59, 59, 999);
+      filter.date.$lte = to;
+    }
+  }
   const records = await Attendance.find(filter).sort({ date: -1 });
   res.status(200).json({ success: true, data: records });
 });
@@ -142,16 +152,33 @@ export const bulkUploadAttendance = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, message: `Imported ${results.imported.length}, failed ${results.failed.length}`, ...results });
 });
 
-/** GET /api/attendance?userId&month&year — HR view. */
+/** GET /api/attendance?userId&month&year&from&to&status — HR attendance register. */
 export const listAttendance = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.userId) {
     if (!mongoose.isValidObjectId(req.query.userId)) throw new ApiError(400, 'Invalid userId');
     filter.userId = req.query.userId;
   }
+  if (req.query.status) filter.status = req.query.status;
+
   const range = monthRange(req.query.month, req.query.year);
-  if (range) filter.date = range;
-  const records = await Attendance.find(filter).sort({ date: -1 }).limit(1000);
+  if (range) {
+    filter.date = range;
+  } else if (req.query.from || req.query.to) {
+    filter.date = {};
+    if (req.query.from) filter.date.$gte = new Date(req.query.from);
+    if (req.query.to) {
+      const to = new Date(req.query.to);
+      // Inclusive end-of-day when a date-only string is passed.
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to))) to.setUTCHours(23, 59, 59, 999);
+      filter.date.$lte = to;
+    }
+  }
+
+  const records = await Attendance.find(filter)
+    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId')
+    .sort({ date: -1 })
+    .limit(5000);
   res.status(200).json({ success: true, data: records });
 });
 
@@ -178,12 +205,26 @@ export const listMyLeaves = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: leaves });
 });
 
-/** GET /api/leaves?status&userId — approval queue (HR). */
+/** GET /api/leaves?status&userId&type&from&to — leave register (HR). */
 export const listLeaves = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
+  if (req.query.type) filter.type = req.query.type;
   if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) filter.userId = req.query.userId;
-  const leaves = await LeaveRequest.find(filter).sort({ createdAt: -1 }).limit(500);
+
+  // Overlap with [from, to]: leave.fromDate <= to AND leave.toDate >= from
+  if (req.query.from || req.query.to) {
+    const from = req.query.from ? new Date(req.query.from) : new Date('1970-01-01');
+    const to = req.query.to ? new Date(req.query.to) : new Date('2999-12-31');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ''))) to.setUTCHours(23, 59, 59, 999);
+    filter.fromDate = { $lte: to };
+    filter.toDate = { $gte: from };
+  }
+
+  const leaves = await LeaveRequest.find(filter)
+    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId')
+    .sort({ createdAt: -1 })
+    .limit(1000);
   res.status(200).json({ success: true, data: leaves });
 });
 

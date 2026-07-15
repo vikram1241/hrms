@@ -17,18 +17,38 @@ test('dashboard stats are admin/HR only', async () => {
   assert.equal(res.status, 403);
 });
 
-test('dashboard stats aggregate employees, pending offers and pending verifications', async () => {
+test('dashboard totalEmployees counts only accepted-offer employees', async () => {
   const { agent, company } = await authAgent(app, { email: 'admin@xyz.com', role: 'admin' });
   const cid = company._id;
 
-  await createUser({ email: 'e1@xyz.com', role: 'employee' });
-  await createUser({
+  const tpl = await SalaryStructureTemplate.create({ companyId: cid, name: 'T', earningsStructure: [], deductionsStructure: [] });
+
+  // Active employee with accepted offer — counts.
+  const e1 = await createUser({ email: 'e1@xyz.com', role: 'employee' });
+  const asn1 = await EmployeeSalaryAssignment.create({
+    companyId: cid, userId: e1._id, templateId: tpl._id, annualCTC: 1200000,
+    frozenMonthlyBreakdown: { earnings: [], deductions: [], grossEarnings: 0, totalDeductions: 0, netTakeHome: 0 }
+  });
+  await OfferLetter.create({
+    companyId: cid, candidateEmail: 'e1@xyz.com', fullName: 'E One', position: 'Dev', department: 'Engineering',
+    joiningDate: new Date(), salaryAssignmentId: asn1._id, status: 'accepted', pdfFileUrl: 'uploads/offers/o1.pdf'
+  });
+
+  // Employee with pending doc verification + accepted offer — still counts.
+  const e2 = await createUser({
     email: 'e2@xyz.com', role: 'employee',
     uploadedDocuments: [{ documentType: 'PAN', documentNumber: 'ABCDE1234F', fileUrl: 'uploads/documents/x.pdf', verificationStatus: 'Pending' }]
   });
+  const asn2 = await EmployeeSalaryAssignment.create({
+    companyId: cid, userId: e2._id, templateId: tpl._id, annualCTC: 1200000,
+    frozenMonthlyBreakdown: { earnings: [], deductions: [], grossEarnings: 0, totalDeductions: 0, netTakeHome: 0 }
+  });
+  await OfferLetter.create({
+    companyId: cid, candidateEmail: 'e2@xyz.com', fullName: 'E Two', position: 'Dev', department: 'Engineering',
+    joiningDate: new Date(), salaryAssignmentId: asn2._id, status: 'accepted', pdfFileUrl: 'uploads/offers/o2.pdf'
+  });
 
-  // A pending offer needs a salary assignment to satisfy the schema.
-  const tpl = await SalaryStructureTemplate.create({ companyId: cid, name: 'T', earningsStructure: [], deductionsStructure: [] });
+  // Staged candidate with sent (unsigned) offer — must NOT inflate headcount.
   const u = await createUser({ email: 'cand@xyz.com', role: 'employee', isActive: false });
   const asn = await EmployeeSalaryAssignment.create({
     companyId: cid, userId: u._id, templateId: tpl._id, annualCTC: 1200000,
@@ -41,7 +61,7 @@ test('dashboard stats aggregate employees, pending offers and pending verificati
 
   const res = await agent.get('/api/dashboard/stats');
   assert.equal(res.status, 200);
-  assert.equal(res.body.stats.totalEmployees, 3); // e1, e2, cand (admin is role 'admin', excluded)
+  assert.equal(res.body.stats.totalEmployees, 2); // e1 + e2 only; cand excluded
   assert.equal(res.body.stats.pendingOffers, 1);
   assert.equal(res.body.stats.pendingVerifications, 1);
 });

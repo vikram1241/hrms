@@ -7,17 +7,18 @@ import Checkbox from '@mui/material/Checkbox';
 import ListItemText from '@mui/material/ListItemText';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
-import { CalendarDays, Check, X, Plus, Trash2, Users, Upload, Download } from 'lucide-react';
+import { CalendarDays, Plus, Trash2, Users, Upload, Download } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
-import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { listUsers } from '../../api/users.js';
 import { fullName } from '../../config/constants.js';
-import { listLeaves, decideLeave, markAttendance, markBulkAttendance, bulkUploadAttendance, listHolidays, createHoliday, deleteHoliday } from '../../api/attendance.js';
+import { markAttendance, markBulkAttendance, bulkUploadAttendance, listHolidays, createHoliday, deleteHoliday } from '../../api/attendance.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
+import AttendanceRegister from './AttendanceRegister.jsx';
+import LeavesRegister from './LeavesRegister.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
@@ -25,23 +26,22 @@ const STATUSES = ['Present', 'Absent', 'Half-Day', 'Leave', 'WeekOff', 'Holiday'
 
 export default function AttendanceAdminPage() {
   const dispatch = useDispatch();
-  const leaves = useAsync(() => listLeaves({ status: 'Pending' }), []);
   const holidays = useAsync(() => listHolidays({ year: new Date().getFullYear() }), []);
-  const { data: usersResp } = useAsync(() => listUsers({ limit: 100, role: 'employee' }), []);
+  const { data: usersResp } = useAsync(() => listUsers({ limit: 200, role: 'employee', status: 'active' }), []);
   const employees = usersResp?.data || [];
   const [att, setAtt] = useState({ userId: '', date: today(), status: 'Present' });
   const [bulk, setBulk] = useState({ userIds: [], date: today(), status: 'Present' });
   const [bulkBusy, setBulkBusy] = useState(false);
   const [hol, setHol] = useState({ date: today(), name: '' });
+  const [registerKey, setRegisterKey] = useState(0);
 
-  const decide = async (id, status) => {
-    try { await decideLeave(id, { status }); dispatch(notifySuccess(`Leave ${status.toLowerCase()}.`)); leaves.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
-  };
   const saveAtt = async () => {
     if (!att.userId) return dispatch(notifyError('Select an employee.'));
-    try { await markAttendance(att); dispatch(notifySuccess('Attendance recorded.')); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    try {
+      await markAttendance(att);
+      dispatch(notifySuccess('Attendance recorded.'));
+      setRegisterKey((k) => k + 1);
+    } catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
   const saveBulk = async () => {
     if (!bulk.userIds.length) return dispatch(notifyError('Select at least one employee.'));
@@ -50,6 +50,7 @@ export default function AttendanceAdminPage() {
       const res = await markBulkAttendance(bulk);
       dispatch(notifySuccess(res.message || 'Bulk attendance recorded.'));
       setBulk({ ...bulk, userIds: [] });
+      setRegisterKey((k) => k + 1);
     } catch (err) { dispatch(notifyError(err.uiMessage)); }
     finally { setBulkBusy(false); }
   };
@@ -63,6 +64,7 @@ export default function AttendanceAdminPage() {
       const res = await bulkUploadAttendance(file);
       dispatch(notifySuccess(res.message || 'Attendance imported.'));
       if (res.failed?.length) dispatch(notifyError(`${res.failed.length} row(s) failed — check employee IDs.`));
+      setRegisterKey((k) => k + 1);
     } catch (err) { dispatch(notifyError(err.uiMessage)); }
     finally { setBulkBusy(false); }
   };
@@ -77,27 +79,16 @@ export default function AttendanceAdminPage() {
 
   return (
     <div>
-      <PageHeader title="Attendance & Leave" subtitle="Approve leave, record attendance and manage holidays" />
+      <PageHeader title="Attendance & Leave" subtitle="Month/week register, leave filters, mark attendance and holidays" />
 
-      <Card className="mb-4"><CardBody>
-        <h3 className="mb-3 text-base font-semibold text-ink">Pending leave approvals</h3>
-        <table className="w-full text-sm">
-          <thead><tr className="text-left text-muted"><th className="pb-2">Type</th><th className="pb-2">From</th><th className="pb-2">To</th><th className="pb-2">Days</th><th className="pb-2">Reason</th><th className="pb-2 text-right">Action</th></tr></thead>
-          <tbody>
-            {(leaves.data || []).map((l) => (
-              <tr key={l._id} className="border-t border-line">
-                <td className="py-2">{l.type}</td><td className="py-2">{fmt(l.fromDate)}</td><td className="py-2">{fmt(l.toDate)}</td>
-                <td className="py-2">{l.days}</td><td className="py-2 text-muted">{l.reason || '—'}</td>
-                <td className="py-2 text-right">
-                  <button className="btn-ghost p-1.5 text-success" onClick={() => decide(l._id, 'Approved')} title="Approve"><Check size={16} /></button>
-                  <button className="btn-ghost p-1.5 text-danger" onClick={() => decide(l._id, 'Rejected')} title="Reject"><X size={16} /></button>
-                </td>
-              </tr>
-            ))}
-            {!leaves.data?.length && <tr><td colSpan={6} className="py-6 text-center text-muted">No pending requests.</td></tr>}
-          </tbody>
-        </table>
-      </CardBody></Card>
+      <AttendanceRegister key={`att-${registerKey}`} employees={employees} />
+      <LeavesRegister
+        key={`lv-${registerKey}`}
+        onDecided={(status) => {
+          dispatch(notifySuccess(`Leave ${status.toLowerCase()}.`));
+          setRegisterKey((k) => k + 1);
+        }}
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card><CardBody>
@@ -158,7 +149,7 @@ export default function AttendanceAdminPage() {
         </CardBody></Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card><CardBody>
           <h3 className="mb-3 flex items-center gap-2 text-base font-semibold text-ink"><CalendarDays size={18} className="text-primary-600" /> Holiday calendar</h3>
           <div className="mb-3 flex items-end gap-2">

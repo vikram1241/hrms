@@ -37,9 +37,21 @@ test('Epic C — company config: admin can update, HR cannot', async () => {
   const { agent: hr } = await authAgent(app, { email: 'hr@xyz.com', role: 'hr' });
 
   assert.equal((await admin.get('/api/company')).status, 200);
-  const upd = await admin.put('/api/company').send({ statutory: { pfNumber: 'PF123', esiNumber: 'ESI9' } });
+  const upd = await admin.put('/api/company').send({ statutory: { gstin: '29ABCDE1234F1Z5', cin: 'U12345KA2020PTC000001' } });
   assert.equal(upd.status, 200);
-  assert.equal(upd.body.company.statutory.pfNumber, 'PF123');
+  assert.equal(upd.body.company.statutory.gstin, '29ABCDE1234F1Z5');
+  assert.equal(upd.body.company.statutory.cin, 'U12345KA2020PTC000001');
+
+  const hrUpd = await admin.put('/api/company').send({
+    hr: { name: 'Y. Mounica', designation: 'HR Manager', contact: '9000278520', email: 'hr@xyz.com' }
+  });
+  assert.equal(hrUpd.status, 200);
+  assert.equal(hrUpd.body.company.hr.name, 'Y. Mounica');
+  assert.equal(hrUpd.body.company.hr.email, 'hr@xyz.com');
+
+  // Branding asset view endpoint rejects missing assets cleanly.
+  const missingAsset = await admin.get('/api/company/asset/logo');
+  assert.equal(missingAsset.status, 404);
 
   assert.equal((await hr.put('/api/company').send({ name: 'Hacked' })).status, 403); // HR lacks company:manage
 });
@@ -132,17 +144,33 @@ test('Employee 360 — admin gets a consolidated section-wise overview', async (
   assert.equal((await emp.get(`/api/users/${employee._id}/overview`)).status, 403);
 });
 
-test('Letter templates — set up offer/appointment/service/FNF templates', async () => {
+test('Letter templates — set up offer/appointment/service/FNF templates with PDF view', async () => {
   const { admin, emp } = await setup();
   const created = await admin.post('/api/letter-templates').send({
     type: 'FNFLetter', name: 'Standard FNF', title: 'Full & Final Settlement',
-    bodyParagraphs: ['Dear {{employeeName}}, your full and final settlement is enclosed.']
+    bodyParagraphs: ['Dear {{employeeName}}, your full and final settlement is enclosed.'],
+    isDefault: true
   });
   assert.equal(created.status, 201);
+  assert.equal(created.body.template.isDefault, true);
+
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+  const withFile = await admin
+    .post('/api/letter-templates')
+    .field('type', 'OfferLetter')
+    .field('name', 'Default Offer')
+    .field('title', 'Offer of Employment')
+    .field('isDefault', 'true')
+    .attach('file', pdf, { filename: 'offer.pdf', contentType: 'application/pdf' });
+  assert.equal(withFile.status, 201);
+  assert.equal(withFile.body.template.hasFile, true);
+
+  const file = await admin.get(`/api/letter-templates/${withFile.body.template._id}/file`);
+  assert.equal(file.status, 200);
 
   const list = await admin.get('/api/letter-templates');
   assert.equal(list.status, 200);
-  assert.equal(list.body.data.length, 1);
+  assert.equal(list.body.data.length, 2);
   assert.ok(list.body.meta.types.includes('ServiceLetter'));
   assert.ok(list.body.meta.placeholders.includes('employeeName'));
 
@@ -197,23 +225,16 @@ test('C&F issue — fill blanks, generate PDF and queue email', async () => {
     templateId: tpl.body.template._id,
     fields: {
       recipientEmail: 'partner@example.com',
-      agreementDay: '14',
-      agreementMonth: 'July',
-      agreementYear: '26',
-      agreementPlace: 'Hyderabad',
       partyName: 'Acme Pharma Distributors',
       partyAddress: '12 Road, Hyderabad',
-      territory: 'Telangana',
-      margin: '12%',
-      godownAddress: 'Warehouse Zone A',
-      monthlyTarget: '500000',
-      securityDeposit: '100000'
+      territory: 'Telangana'
     }
   });
   assert.equal(issued.status, 201);
   assert.ok(issued.body.issue.pdfFileUrl);
   assert.equal(issued.body.issue.recipientEmail, 'partner@example.com');
-  // In test env SMTP is stubbed — PDF is still generated.
+  assert.ok(issued.body.issue.fieldValues.agreementDay);
+  assert.ok(issued.body.issue.fieldValues.agreementMonth);
   assert.ok(['generated', 'sent', 'failed'].includes(issued.body.issue.status));
 
   const list = await admin.get('/api/cf-issues');
