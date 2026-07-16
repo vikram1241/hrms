@@ -198,6 +198,34 @@ export const sendPayslipNotice = ({ to, fullName, period }) =>
     meta: { type: 'payslip_notice', period }
   });
 
+/**
+ * Email an appointment letter PDF using subject/body from Letter Template Setup
+ * (placeholders already applied by the caller).
+ */
+export const sendAppointmentLetter = async ({ to, subject, body, pdfPath, fileName } = {}) => {
+  const cfg = await loadCompanyMail();
+  const brand = cfg.brandName;
+  const subj = (subject && String(subject).trim())
+    || `Your appointment letter from ${brand}`;
+  const text = (body && String(body).trim())
+    || `Please find attached your Letter of Appointment from ${brand}.`;
+  return deliver({
+    to,
+    subject: subj,
+    body: text,
+    html: wrapHtml(plainTextToHtml(text), brand),
+    meta: { type: 'appointment_letter', hasPdf: Boolean(pdfPath) },
+    cfg,
+    attachments: pdfPath
+      ? [{
+        filename: fileName || 'appointment-letter.pdf',
+        path: pdfPath,
+        contentType: 'application/pdf'
+      }]
+      : undefined
+  });
+};
+
 /** Email a generated C&F agreement PDF to the partner. */
 export const sendCFAgreement = async ({ to, partyName, typeLabel, brandName, pdfPath, fileName }) => {
   const cfg = await loadCompanyMail();

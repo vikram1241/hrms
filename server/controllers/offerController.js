@@ -15,6 +15,7 @@ import { generateOfferLetterPdf } from '../services/pdfService.js';
 import { upsertCandidateUser } from '../services/candidateService.js';
 import { provisionEmployee } from '../services/provisioningService.js';
 import { sendOfferInvite } from '../services/emailService.js';
+import { issueAndEmailAppointmentLetter } from '../services/appointmentLetterService.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 import Company from '../models/Company.js';
 import { resolveDefaultLetterTemplate } from './letterTemplateController.js';
@@ -488,6 +489,57 @@ export const approveOffer = asyncHandler(async (req, res) => {
     employeeId: provisioning?.employeeId || null,
     credentialsEmailedTo: offer.candidateEmail,
     ...(exposeToken() && provisioning ? { tempPassword: provisioning.tempPassword } : {})
+  });
+});
+
+/**
+ * POST /api/offers/:id/appointment-letter
+ * Generate Appointment Letter from Template Setup default, issue as EmployeeDocument,
+ * and email the PDF to the employee. Only for accepted offers.
+ */
+export const generateAppointmentLetter = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid offer id');
+  const offer = await OfferLetter.findById(req.params.id).populate({ path: 'salaryAssignmentId' });
+  if (!offer) throw new ApiError(404, 'Offer not found');
+  if (offer.status !== 'accepted') {
+    throw new ApiError(400, 'Appointment letter can only be generated for accepted offers');
+  }
+
+  let user = null;
+  const userId = offer.salaryAssignmentId?.userId;
+  if (userId) user = await User.findById(userId);
+  if (!user) {
+    user = await User.findOne({ email: offer.candidateEmail, companyId: offer.companyId });
+  }
+  if (!user) throw new ApiError(404, 'Employee account not found for this offer');
+
+  const result = await issueAndEmailAppointmentLetter({
+    user,
+    issuedBy: req.user,
+    designation: offer.position || user.employeeDetails?.designation,
+    effectiveDate: offer.joiningDate || user.employeeDetails?.dateOfJoining || new Date(),
+    department: offer.department || user.employeeDetails?.department,
+    companyId: offer.companyId,
+    annualCTCPaisa: offer.salaryAssignmentId?.annualCTC
+  });
+
+  await logActivity({
+    actor: req.user,
+    action: 'offer.appointment_letter',
+    entityType: 'OfferLetter',
+    entityId: offer._id,
+    message: `Appointment letter issued to ${offer.fullName} (${offer.candidateEmail})`
+  });
+
+  const mailed = result.email?.delivered
+    ? ` and emailed to ${offer.candidateEmail}`
+    : ` (email ${result.email?.mode || 'stub'} — check SMTP if not delivered)`;
+
+  res.status(201).json({
+    success: true,
+    message: `${result.title} generated${mailed}`,
+    document: result.document,
+    email: result.email
   });
 });
 

@@ -4,7 +4,7 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import Tooltip from '@mui/material/Tooltip';
-import { Search, Plus, FileSpreadsheet, Eye, Send, CheckCircle2, RefreshCw, Trash2 } from 'lucide-react';
+import { Search, Plus, FileSpreadsheet, Eye, Send, CheckCircle2, RefreshCw, Trash2, FileCheck } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -14,7 +14,7 @@ import TablePager from '../../components/ui/TablePager.jsx';
 import CreateOfferDialog from './CreateOfferDialog.jsx';
 import BulkUploadDialog from './BulkUploadDialog.jsx';
 import {
-  listOffers, updateOfferStatus, approveOffer, resendOffer,
+  listOffers, updateOfferStatus, approveOffer, generateAppointmentLetter, resendOffer,
   regenerateOffer, deleteOffer, offerPdfUrl
 } from '../../api/offers.js';
 import { OFFER_STATUSES } from '../../config/constants.js';
@@ -33,7 +33,7 @@ export default function OffersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [busyId, setBusyId] = useState(null);
-  const [confirm, setConfirm] = useState(null); // { type: 'delete'|'regenerate', offer }
+  const [confirm, setConfirm] = useState(null); // { type: 'delete'|'regenerate'|'appointment', offer }
 
   useEffect(() => {
     const t = setTimeout(() => { setPage(1); setFilters((f) => ({ ...f, search: searchInput })); }, 350);
@@ -100,6 +100,9 @@ export default function OffersPage() {
       } else if (type === 'regenerate') {
         await regenerateOffer(offer._id);
         dispatch(notifySuccess('Offer PDF regenerated. You can resend when ready.'));
+      } else if (type === 'appointment') {
+        const res = await generateAppointmentLetter(offer._id);
+        dispatch(notifySuccess(res.message || 'Appointment letter generated and emailed.'));
       }
       setConfirm(null);
       fetchOffers();
@@ -130,7 +133,7 @@ export default function OffersPage() {
       )
     },
     {
-      headerName: 'Actions', filter: false, sortable: false, minWidth: 200, maxWidth: 220,
+      headerName: 'Actions', filter: false, sortable: false, minWidth: 220, maxWidth: 260,
       cellRenderer: (p) => {
         const o = p.data;
         const busy = busyId === o._id;
@@ -142,6 +145,18 @@ export default function OffersPage() {
                 <Eye size={16} />
               </a>
             </Tooltip>
+            {o.status === 'accepted' && (
+              <Tooltip title="Generate Appointment Letter">
+                <button
+                  type="button"
+                  className="btn-ghost p-2 text-primary-700 disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => setConfirm({ type: 'appointment', offer: o })}
+                >
+                  <FileCheck size={16} />
+                </button>
+              </Tooltip>
+            )}
             {o.status === 'signed' && (
               <Tooltip title="Approve & issue credentials">
                 <button type="button" className="btn-ghost p-2 text-success disabled:opacity-40" disabled={busy} onClick={() => approve(o)}>
@@ -223,12 +238,26 @@ export default function OffersPage() {
         onConfirm={runConfirm}
         loading={Boolean(busyId)}
         danger={confirm?.type === 'delete'}
-        title={confirm?.type === 'delete' ? 'Delete offer?' : 'Regenerate offer PDF?'}
-        confirmLabel={confirm?.type === 'delete' ? 'Delete' : 'Regenerate'}
+        title={
+          confirm?.type === 'delete'
+            ? 'Delete offer?'
+            : confirm?.type === 'appointment'
+              ? 'Generate appointment letter?'
+              : 'Regenerate offer PDF?'
+        }
+        confirmLabel={
+          confirm?.type === 'delete'
+            ? 'Delete'
+            : confirm?.type === 'appointment'
+              ? 'Generate & email'
+              : 'Regenerate'
+        }
         message={
           confirm?.type === 'delete'
             ? `"${confirm.offer.fullName}" — the offer and its PDF will be permanently removed.`
-            : `"${confirm?.offer?.fullName}" — rebuild the PDF from the salary freeze and letter template. Any e-signature will be cleared; resend afterward if needed.`
+            : confirm?.type === 'appointment'
+              ? `"${confirm?.offer?.fullName}" — generate the Appointment Letter from Template Setup and email the PDF to ${confirm?.offer?.candidateEmail}.`
+              : `"${confirm?.offer?.fullName}" — rebuild the PDF from the salary freeze and letter template. Any e-signature will be cleared; resend afterward if needed.`
         }
       />
     </div>

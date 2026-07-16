@@ -471,13 +471,6 @@ export const generateOfferLetterPdf = async ({
     }
   };
 
-  const drawAmount = (value, xRight, size, useBold = false) => {
-    const t = ascii(value);
-    const f = useBold ? bold : font;
-    const w = f.widthOfTextAtSize(t, size);
-    page.drawText(t, { x: xRight - w, y, size, font: f, color: ink });
-  };
-
   // Date (right) — value bold
   {
     const label = 'Date: ';
@@ -574,22 +567,66 @@ export const generateOfferLetterPdf = async ({
   ], { size: 10, gap: 14 });
   y -= 8;
 
-  // Prefer salary table on a fresh page when remaining space is tight (reference flow).
-  const earningsCount = (breakdown?.earnings || []).length;
-  const pfRows = (breakdown?.deductions || []).filter((x) =>
-    /pf|provident|esi|employer/i.test(`${x.key || ''} ${x.label || ''}`)
-  ).length;
-  const tableRows = earningsCount + pfRows + 4; // header + gross + total + incentives
-  const tableNeed = 28 + tableRows * 20 + 24;
-  if (y < contentBottomY + tableNeed + 40) newPage();
-  else ensure(tableNeed);
+  // Bordered salary breakdown table (earnings, all deductions, net take-home, CTC).
+  const monthlyCtc = Math.round(Number(annualCTC || 0) / 12);
+  const salaryRows = [
+    ...(breakdown?.earnings || []).map((e) => ({
+      label: e.label,
+      value: amountCell(e.monthlyAmount),
+      bold: false
+    })),
+    {
+      label: 'Gross Month Salary',
+      value: amountCell(breakdown?.grossEarnings || 0),
+      bold: true
+    },
+    ...(breakdown?.deductions || []).map((d) => ({
+      label: d.label,
+      value: amountCell(d.monthlyAmount),
+      bold: false
+    })),
+    {
+      label: 'Total Deductions',
+      value: amountCell(breakdown?.totalDeductions || 0),
+      bold: true
+    },
+    {
+      label: 'Net Take Home (Monthly)',
+      value: amountCell(breakdown?.netTakeHome || 0),
+      bold: true
+    },
+    {
+      label: 'Total CTC (Monthly)',
+      value: amountCell(monthlyCtc),
+      bold: true
+    },
+    {
+      label: 'Incentives / Performance Bonus',
+      value: 'As per Company incentive scheme',
+      bold: false,
+      mutedValue: true
+    }
+  ];
 
   const tableX = MARGIN_X;
   const tableW = CONTENT_WIDTH;
-  const colAmtRight = tableX + tableW - 12;
+  const splitX = tableX + Math.round(tableW * 0.62);
+  const colAmtRight = tableX + tableW - 10;
   const rowH = 18;
+  const tableLine = rgb(0.55, 0.55, 0.58);
+  const tableNeed = 24 + (salaryRows.length + 1) * rowH + 16;
+  if (y < contentBottomY + tableNeed) newPage();
+  else ensure(tableNeed);
 
-  page.drawRectangle({ x: tableX, y: y - 4, width: tableW, height: rowH + 2, color: headerBg });
+  const tableTop = y + 12;
+  // Header
+  page.drawRectangle({
+    x: tableX,
+    y: y - 4,
+    width: tableW,
+    height: rowH + 2,
+    color: headerBg
+  });
   page.drawText('Particulars', { x: tableX + 8, y, size: 10, font: bold, color: ink });
   page.drawText('Amount (INR)', {
     x: colAmtRight - bold.widthOfTextAtSize('Amount (INR)', 10),
@@ -598,45 +635,47 @@ export const generateOfferLetterPdf = async ({
     font: bold,
     color: ink
   });
-  y -= rowH + 4;
+  y -= rowH;
 
-  for (const e of (breakdown?.earnings || [])) {
-    ensure(40);
-    page.drawText(ascii(e.label), { x: tableX + 8, y, size: 10, font, color: ink });
-    drawAmount(amountCell(e.monthlyAmount), colAmtRight, 10, true);
+  for (const row of salaryRows) {
+    page.drawLine({
+      start: { x: tableX, y: y + rowH - 4 },
+      end: { x: tableX + tableW, y: y + rowH - 4 },
+      thickness: 0.5,
+      color: tableLine
+    });
+    const f = row.bold ? bold : font;
+    page.drawText(ascii(row.label), { x: tableX + 8, y, size: 10, font: f, color: ink });
+    const val = ascii(row.value);
+    const vf = row.mutedValue ? font : (row.bold ? bold : font);
+    const vs = row.mutedValue ? 9 : 10;
+    const vw = vf.widthOfTextAtSize(val, vs);
+    page.drawText(val, {
+      x: colAmtRight - vw,
+      y,
+      size: vs,
+      font: vf,
+      color: row.mutedValue ? muted : ink
+    });
     y -= rowH;
   }
 
-  ensure(40);
-  page.drawText('Gross Month Salary', { x: tableX + 8, y, size: 10, font: bold, color: ink });
-  drawAmount(amountCell(breakdown?.grossEarnings || 0), colAmtRight, 10, true);
-  y -= rowH;
-
-  for (const d of (breakdown?.deductions || []).filter((x) =>
-    /pf|provident|esi|employer/i.test(`${x.key || ''} ${x.label || ''}`)
-  )) {
-    ensure(40);
-    page.drawText(ascii(d.label), { x: tableX + 8, y, size: 10, font, color: ink });
-    drawAmount(amountCell(d.monthlyAmount), colAmtRight, 10, true);
-    y -= rowH;
-  }
-
-  const monthlyCtc = Math.round(Number(annualCTC || 0) / 12);
-  ensure(40);
-  page.drawText('Total CTC (Monthly)', { x: tableX + 8, y, size: 10, font: bold, color: ink });
-  drawAmount(amountCell(monthlyCtc), colAmtRight, 10, true);
-  y -= rowH;
-
-  ensure(40);
-  page.drawText('Incentives / Performance Bonus', { x: tableX + 8, y, size: 10, font, color: ink });
-  page.drawText('As per Company incentive scheme', {
-    x: colAmtRight - font.widthOfTextAtSize('As per Company incentive scheme', 9),
-    y,
-    size: 9,
-    font,
-    color: muted
+  const tableBottom = y + rowH - 4;
+  page.drawRectangle({
+    x: tableX,
+    y: tableBottom,
+    width: tableW,
+    height: tableTop - tableBottom,
+    borderColor: tableLine,
+    borderWidth: 1
   });
-  y -= rowH + 14;
+  page.drawLine({
+    start: { x: splitX, y: tableBottom },
+    end: { x: splitX, y: tableTop },
+    thickness: 0.5,
+    color: tableLine
+  });
+  y -= 14;
 
   writeRich([
     { text: 'Annual CTC (Cost to Company) will be approximately ', bold: true },

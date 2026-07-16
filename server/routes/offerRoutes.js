@@ -6,6 +6,7 @@ import {
   getOffer,
   updateOfferStatus,
   approveOffer,
+  generateAppointmentLetter,
   downloadOfferPdf,
   sendOfferEmail,
   regenerateOffer,
@@ -39,6 +40,7 @@ router.get('/:id', requirePermission(PERMISSIONS.OFFER_READ), getOffer);
 router.get('/:id/pdf', requirePermission(PERMISSIONS.OFFER_READ), downloadOfferPdf);
 router.patch('/:id/status', requirePermission(PERMISSIONS.OFFER_MANAGE), offerStatusRules, validate, updateOfferStatus);
 router.post('/:id/approve', requirePermission(PERMISSIONS.OFFER_APPROVE), approveOffer);
+router.post('/:id/appointment-letter', requirePermission(PERMISSIONS.OFFER_MANAGE), generateAppointmentLetter);
 router.post('/:id/send', requirePermission(PERMISSIONS.OFFER_MANAGE), sendOfferEmail);
 router.post('/:id/regenerate', requirePermission(PERMISSIONS.OFFER_MANAGE), regenerateOffer);
 router.post('/:id/resend', requirePermission(PERMISSIONS.OFFER_MANAGE), resendOffer);
