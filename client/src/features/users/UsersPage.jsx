@@ -3,7 +3,6 @@ import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import Pagination from '@mui/material/Pagination';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Tooltip from '@mui/material/Tooltip';
@@ -16,6 +15,7 @@ import DataGrid from '../../components/ui/DataGrid.jsx';
 import Avatar from '../../components/ui/Avatar.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
+import TablePager from '../../components/ui/TablePager.jsx';
 import EditUserDialog from './EditUserDialog.jsx';
 import AssignSalaryDialog from './AssignSalaryDialog.jsx';
 import { listUsers, deleteUser, restoreUser, generateCredentials, sendPasswordResetLink } from '../../api/users.js';
@@ -74,6 +74,7 @@ export default function UsersPage() {
   const [filters, setFilters] = useState({ search: '', role: '', status: '', department: '', includeDeleted: false });
   const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [resp, setResp] = useState({ data: [], pagination: { total: 0, pages: 1 } });
   const [loading, setLoading] = useState(true);
 
@@ -95,7 +96,7 @@ export default function UsersPage() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const data = await listUsers({ ...filters, includeDeleted: filters.includeDeleted ? 'true' : undefined, page, limit: 10 });
+      const data = await listUsers({ ...filters, includeDeleted: filters.includeDeleted ? 'true' : undefined, page, limit });
       setResp(data);
     } catch (err) {
       dispatch(notifyError(err.uiMessage));
@@ -105,7 +106,7 @@ export default function UsersPage() {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchUsers(); }, [filters, page]);
+  useEffect(() => { fetchUsers(); }, [filters, page, limit]);
 
   const confirmDelete = async () => {
     setDeleting(true);
@@ -212,12 +213,15 @@ export default function UsersPage() {
 
       <DataGrid rowData={resp.data} columnDefs={columnDefs} loading={loading} pagination={false} height={560} />
 
-      <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
-        <p className="text-sm text-muted">
-          Showing {resp.data.length} of {resp.pagination.total} entries
-        </p>
-        <Pagination count={resp.pagination.pages || 1} page={page} onChange={(_, p) => setPage(p)} color="primary" shape="rounded" />
-      </div>
+      <TablePager
+        page={page}
+        pages={resp.pagination.pages || 1}
+        total={resp.pagination.total || 0}
+        limit={limit}
+        showingCount={resp.data.length}
+        onPageChange={setPage}
+        onLimitChange={(n) => { setLimit(n); setPage(1); }}
+      />
 
       <EditUserDialog open={Boolean(editUser)} user={editUser} onClose={() => setEditUser(null)} onSaved={fetchUsers} />
       <AssignSalaryDialog open={Boolean(assignUser)} user={assignUser} onClose={() => setAssignUser(null)} />

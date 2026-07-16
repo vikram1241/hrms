@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { createAsset, listAssets, listMyAssets, assignAsset, returnAsset, updateAsset } from '../controllers/assetController.js';
+import {
+  createAsset, listAssets, listMyAssets, assignAsset, returnAsset, updateAsset, deleteAsset
+} from '../controllers/assetController.js';
 import { verifyToken, requirePermission } from '../middleware/authMiddleware.js';
 import { PERMISSIONS } from '../config/permissions.js';
 
@@ -14,5 +16,6 @@ router.post('/', manage, createAsset);
 router.post('/:id/assign', manage, assignAsset);
 router.post('/:id/return', manage, returnAsset);
 router.patch('/:id', manage, updateAsset);
+router.delete('/:id', manage, deleteAsset);
 
 export default router;

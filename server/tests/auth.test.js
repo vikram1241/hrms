@@ -27,21 +27,21 @@ test('wrong password returns generic 401', async () => {
   await createUser({ email: 'a@xyz.com', password: 'Password1' });
   const res = await request(app).post('/api/auth/login').send({ companySlug: SLUG, email: 'a@xyz.com', password: 'wrong' });
   assert.equal(res.status, 401);
-  assert.equal(res.body.message, 'Invalid company code, email or password');
+  assert.equal(res.body.message, 'Invalid company code, email/Employee ID or password');
 });
 
 test('unknown email returns the same generic 401 (no enumeration)', async () => {
   await createUser({ email: 'someone@xyz.com', password: 'Password1' }); // ensures the company exists
   const res = await request(app).post('/api/auth/login').send({ companySlug: SLUG, email: 'nope@xyz.com', password: 'whatever' });
   assert.equal(res.status, 401);
-  assert.equal(res.body.message, 'Invalid company code, email or password');
+  assert.equal(res.body.message, 'Invalid company code, email/Employee ID or password');
 });
 
 test('wrong company code returns the same generic 401', async () => {
   await createUser({ email: 'a@xyz.com', password: 'Password1' });
   const res = await request(app).post('/api/auth/login').send({ companySlug: 'no-such-co', email: 'a@xyz.com', password: 'Password1' });
   assert.equal(res.status, 401);
-  assert.equal(res.body.message, 'Invalid company code, email or password');
+  assert.equal(res.body.message, 'Invalid company code, email/Employee ID or password');
 });
 
 test('deactivated account is rejected with 403', async () => {
@@ -50,7 +50,7 @@ test('deactivated account is rejected with 403', async () => {
   assert.equal(res.status, 403);
 });
 
-test('missing email fails validation with 400', async () => {
+test('missing email/Employee ID fails validation with 400', async () => {
   const res = await request(app).post('/api/auth/login').send({ companySlug: SLUG, password: 'Password1' });
   assert.equal(res.status, 400);
   assert.equal(res.body.message, 'Validation failed');

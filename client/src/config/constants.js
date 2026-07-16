@@ -14,7 +14,8 @@ export const DOC_TYPES = [
 export const DOC_TYPE_LABEL = {
   PAN: 'PAN', Aadhar: 'Aadhar', Passport: 'Passport', VoterID: 'Voter ID',
   EducationCertificate: 'Education Certificate', DegreeCertificate: 'Education Certificate',
-  RelievingLetter: 'Relieving Letter', Payslip: 'Payslip'
+  RelievingLetter: 'Relieving Letter', Payslip: 'Payslip',
+  PreviousOfferLetter: 'Previous Offer Letter', ServiceOrFnfLetter: 'Service Letter / FNF'
 };
 export const OFFER_STATUSES = ['sent', 'pending', 'signed', 'accepted', 'declined'];
 export const CALC_TYPES = [

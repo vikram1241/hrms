@@ -24,7 +24,9 @@ export const DOCUMENT_TYPES = [
   'Aadhar', 'PAN', 'Passport', 'VoterID', 'DrivingLicence', 'PassportPhoto',
   'SSCCertificate', 'HSCCertificate', 'DegreeCertificate', 'EducationCertificate',
   'PostGraduateCertificate', 'ProfessionalCertificate',
-  'ExperienceCertificate', 'RelievingLetter', 'Payslip', 'Other'
+  'ExperienceCertificate', 'RelievingLetter', 'Payslip', 'Other',
+  // Previous-employer intake (onboarding wizard)
+  'PreviousOfferLetter', 'ServiceOrFnfLetter'
 ];
 
 const DocumentReferenceSchema = new mongoose.Schema({
@@ -47,7 +49,7 @@ const EducationSchema = new mongoose.Schema({
   documentFileUrl: { type: String, default: null } // link to the uploaded certificate
 }, { _id: true });
 
-// Epic 9 — prior employment record.
+// Epic 9 — prior employment record (+ previous-employer document intake).
 const ExperienceSchema = new mongoose.Schema({
   employerName: { type: String, required: true, trim: true },
   designation: { type: String, trim: true },
@@ -55,6 +57,9 @@ const ExperienceSchema = new mongoose.Schema({
   toDate: { type: Date },
   lastDrawnCTC: { type: Number }, // annual, in paisa (integer) — consistent with payroll
   reasonForLeaving: { type: String, trim: true },
+  offerLetterFileUrl: { type: String, default: null },
+  payslipFileUrls: { type: [String], default: [] }, // expect 3 when applicable
+  serviceOrFnfFileUrl: { type: String, default: null }, // service letter or FNF
   relievingDocFileUrl: { type: String, default: null },
   experienceDocFileUrl: { type: String, default: null }
 }, { _id: true });
@@ -82,8 +87,15 @@ const UserSchema = new mongoose.Schema({
   // Kept distinct from `isActive` so "deactivated" and "deleted" stay separate.
   deletedAt: { type: Date, default: null, index: true },
 
-  // Onboarding progress tracker (Epic 6). Highest completed wizard stage.
-  onboardingStage: { type: String, enum: ['personal', 'family', 'contact', 'bank', 'completed'], default: 'personal' },
+  // Onboarding progress tracker (Epic 6). Current wizard stage to complete.
+  onboardingStage: {
+    type: String,
+    enum: ['personal', 'family', 'contact', 'experience', 'bank', 'completed'],
+    default: 'personal'
+  },
+
+  // Fresher / no prior employment — skips previous-employer document requirements.
+  previousEmployerNotApplicable: { type: Boolean, default: false },
 
   // Hashed, single-use credential-setup token issued after offer acceptance
   // (US 5.4). Raw token is emailed; only the hash is persisted.

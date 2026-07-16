@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
@@ -8,7 +8,9 @@ import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import FormDialog from '../../components/ui/FormDialog.jsx';
+import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
+import JobRoleSelect from '../../components/feature/JobRoleSelect.jsx';
 import CFIssuePanel from './CFIssuePanel.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { issueDocument } from '../../api/employeeDocs.js';
@@ -33,33 +35,80 @@ export default function DocCenterPage() {
   const [typeOpen, setTypeOpen] = useState(false);
   const [typeForm, setTypeForm] = useState({ name: '', section: 'Tax', kind: 'read', termsText: '', fields: [] });
   const [typeBusy, setTypeBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
-  const [upload, setUpload] = useState({ userId: '', documentTypeId: '', file: null });
+  const [upload, setUpload] = useState({ userId: '', description: '', documentTypeId: '', file: null });
   const [upBusy, setUpBusy] = useState(false);
+
+  useEffect(() => {
+    if (types.error) dispatch(notifyError(types.error));
+  }, [types.error, dispatch]);
 
   const doIssue = async () => {
     if (!gen.userId) return dispatch(notifyError('Select an employee.'));
     setGenBusy(true);
     try { await issueDocument(gen); dispatch(notifySuccess('Document issued.')); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    catch (err) { dispatch(notifyError(err.uiMessage || 'Could not issue document.')); }
     finally { setGenBusy(false); }
   };
 
   const saveType = async (e) => {
     e.preventDefault();
     setTypeBusy(true);
-    try { await createType(typeForm); dispatch(notifySuccess('Document type created.')); setTypeOpen(false); setTypeForm({ name: '', section: 'Tax', kind: 'read', termsText: '', fields: [] }); types.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
-    finally { setTypeBusy(false); }
+    try {
+      await createType(typeForm);
+      dispatch(notifySuccess('Document type created.'));
+      setTypeOpen(false);
+      setTypeForm({ name: '', section: 'Tax', kind: 'read', termsText: '', fields: [] });
+      types.reload();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Could not create document type.'));
+    } finally {
+      setTypeBusy(false);
+    }
   };
-  const removeType = async (id) => { try { await deleteType(id); types.reload(); } catch (err) { dispatch(notifyError(err.uiMessage)); } };
+
+  const removeType = async () => {
+    if (!deleteTarget?._id) return dispatch(notifyError('Could not delete document type.'));
+    setDeleting(true);
+    try {
+      await deleteType(deleteTarget._id);
+      dispatch(notifySuccess('Document type removed.'));
+      setDeleteTarget(null);
+      types.reload();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Could not delete document type.'));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const doUpload = async () => {
-    if (!upload.userId || !upload.documentTypeId || !upload.file) return dispatch(notifyError('Employee, type and PDF are required.'));
+    if (!upload.userId || !upload.description.trim() || !upload.file) {
+      return dispatch(notifyError('Employee, description and PDF are required.'));
+    }
+    if (upload.file.type !== 'application/pdf') {
+      return dispatch(notifyError('Only PDF files are accepted.'));
+    }
+    if (upload.file.size > 5 * 1024 * 1024) {
+      return dispatch(notifyError('File must be 5MB or smaller.'));
+    }
     setUpBusy(true);
-    try { await uploadForEmployee(upload); dispatch(notifySuccess('Document uploaded to employee.')); setUpload({ userId: '', documentTypeId: '', file: null }); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
-    finally { setUpBusy(false); }
+    try {
+      await uploadForEmployee({
+        userId: upload.userId,
+        description: upload.description.trim(),
+        documentTypeId: upload.documentTypeId || undefined,
+        file: upload.file
+      });
+      dispatch(notifySuccess('Document uploaded to employee.'));
+      setUpload({ userId: '', description: '', documentTypeId: '', file: null });
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Could not upload document.'));
+    } finally {
+      setUpBusy(false);
+    }
   };
 
   const addField = () => setTypeForm((f) => ({ ...f, fields: [...f.fields, { key: '', label: '', type: 'text', required: false }] }));
@@ -79,7 +128,7 @@ export default function DocCenterPage() {
             </TextField>
             <div className="grid grid-cols-2 gap-3">
               <TextField type="date" size="small" label="Effective date" InputLabelProps={{ shrink: true }} value={gen.effectiveDate} onChange={(e) => setGen({ ...gen, effectiveDate: e.target.value })} />
-              <TextField size="small" label="Designation" value={gen.designation} onChange={(e) => setGen({ ...gen, designation: e.target.value })} />
+              <JobRoleSelect value={gen.designation} onChange={(v) => setGen({ ...gen, designation: v })} />
             </div>
             <Button onClick={doIssue} loading={genBusy}>Issue &amp; seal document</Button>
             <p className="text-xs text-muted">The company stamp &amp; authorized signature (from Company Settings) are printed on the PDF.</p>
@@ -90,14 +139,24 @@ export default function DocCenterPage() {
           <h3 className="mb-3 text-base font-semibold text-ink">Upload a document to an employee</h3>
           <div className="space-y-3">
             <EmployeeSelect value={upload.userId} onChange={(v) => setUpload({ ...upload, userId: v })} />
-            <TextField select size="small" fullWidth label="Document type" value={upload.documentTypeId} onChange={(e) => setUpload({ ...upload, documentTypeId: e.target.value })}>
-              <MenuItem value="">Select…</MenuItem>
+            <TextField
+              size="small"
+              fullWidth
+              required
+              label="Description"
+              placeholder="e.g. Form 16 FY 2025-26"
+              value={upload.description}
+              onChange={(e) => setUpload({ ...upload, description: e.target.value })}
+            />
+            <TextField select size="small" fullWidth label="Document type (optional)" value={upload.documentTypeId} onChange={(e) => setUpload({ ...upload, documentTypeId: e.target.value })}>
+              <MenuItem value="">None — description only</MenuItem>
               {(types.data || []).map((t) => <MenuItem key={t._id} value={t._id}>{t.name} ({t.kind})</MenuItem>)}
             </TextField>
             <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-sm text-muted hover:border-primary-400">
-              <Upload size={16} /> {upload.file ? upload.file.name : 'Choose a PDF…'}
+              <Upload size={16} /> {upload.file ? upload.file.name : 'Choose a PDF (max 5MB)…'}
               <input type="file" accept="application/pdf" hidden onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] || null })} />
             </label>
+            <p className="text-xs text-muted">Allowed: PDF only. Maximum size: 5MB. Description is shown to the employee.</p>
             <Button onClick={doUpload} loading={upBusy}>Upload &amp; assign</Button>
           </div>
         </CardBody></Card>
@@ -119,13 +178,32 @@ export default function DocCenterPage() {
                 <td className="py-2 text-muted">{t.section}</td>
                 <td className="py-2"><StatusBadge status={t.kind === 'write' ? 'processing' : 'pending'} label={t.kind} /></td>
                 <td className="py-2 text-muted">{t.fields?.length || 0}</td>
-                <td className="py-2 text-right"><button className="btn-ghost p-1 text-danger" onClick={() => removeType(t._id)}><Trash2 size={14} /></button></td>
+                <td className="py-2 text-right">
+                  <button
+                    type="button"
+                    className="btn-ghost p-1 text-danger"
+                    onClick={() => setDeleteTarget(t)}
+                    aria-label={`Delete ${t.name}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </td>
               </tr>
             ))}
             {!types.data?.length && <tr><td colSpan={5} className="py-6 text-center text-muted">No document types yet.</td></tr>}
           </tbody>
         </table>
       </CardBody></Card>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={removeType}
+        loading={deleting}
+        title="Remove document type?"
+        confirmLabel="Remove"
+        message={deleteTarget ? `"${deleteTarget.name}" will be deactivated and hidden from this list.` : ''}
+      />
 
       <FormDialog open={typeOpen} onClose={() => setTypeOpen(false)} title="New document type" onSubmit={saveType} loading={typeBusy} submitLabel="Create" maxWidth="md">
         <div className="space-y-3 py-1">

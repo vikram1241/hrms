@@ -41,7 +41,40 @@ test('create a single offer: stages candidate, freezes salary, emails magic link
   assert.equal(res.status, 201);
   assert.equal(res.body.offer.status, 'sent');
   assert.ok(res.body.accessToken, 'raw token exposed in non-prod');
-  assert.equal(getOutbox().filter((m) => m.meta.type === 'offer_invite').length, 1);
+  assert.ok(res.body.emailPreview?.subject);
+  assert.ok(res.body.emailPreview?.body);
+  const invite = getOutbox().filter((m) => m.meta.type === 'offer_invite');
+  assert.equal(invite.length, 1);
+  assert.equal(invite[0].attachmentCount, 1);
+});
+
+test('preview then send: generate without email, then send with edited subject/body', async () => {
+  const { agent, tpl } = await setup();
+  const created = await agent.post('/api/offers').send({
+    candidateEmail: 'preview@example.com',
+    fullName: 'Preview User',
+    position: 'Analyst',
+    department: 'Finance',
+    joiningDate: '2026-09-01',
+    templateId: tpl._id,
+    annualCTC: 800000,
+    sendEmail: false
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.offer.status, 'pending');
+  assert.equal(getOutbox().filter((m) => m.meta.type === 'offer_invite').length, 0);
+  assert.ok(created.body.emailPreview?.subject);
+
+  const sent = await agent.post(`/api/offers/${created.body.offer._id}/send`).send({
+    subject: 'Custom subject for Preview User',
+    body: created.body.emailPreview.body
+  });
+  assert.equal(sent.status, 200);
+  assert.equal(sent.body.offer.status, 'sent');
+  const invite = getOutbox().filter((m) => m.meta.type === 'offer_invite');
+  assert.equal(invite.length, 1);
+  assert.equal(invite[0].subject, 'Custom subject for Preview User');
+  assert.equal(invite[0].attachmentCount, 1);
 });
 
 test('offer creation validates required fields', async () => {

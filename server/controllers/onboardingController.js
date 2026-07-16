@@ -2,7 +2,7 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
-const STAGES = ['personal', 'family', 'contact', 'bank', 'completed'];
+const STAGES = ['personal', 'family', 'contact', 'experience', 'bank', 'completed'];
 
 // Advance the stored stage forward only (never regress on a re-save).
 const advanceStage = (user, justCompleted) => {
@@ -18,6 +18,9 @@ const loadSelf = async (req) => {
   return user;
 };
 
+const experienceComplete = (user) =>
+  Boolean(user.previousEmployerNotApplicable) || (user.experienceHistory || []).length > 0;
+
 /**
  * GET /api/onboarding/status — US 6.3
  * Returns the wizard stage plus per-section completeness and a document summary.
@@ -32,8 +35,11 @@ export const getOnboardingStatus = asyncHandler(async (req, res) => {
       personal: Boolean(user.personalDetails?.firstName && user.personalDetails?.dateOfBirth),
       family: (user.familyDetails || []).length > 0,
       contact: user.contactInfo?.personalMobile && user.contactInfo.personalMobile !== '0000000000',
+      experience: experienceComplete(user),
       bank: Boolean(user.employeeDetails?.bankDetails?.accountNumber)
     },
+    previousEmployerNotApplicable: Boolean(user.previousEmployerNotApplicable),
+    experienceHistory: user.experienceHistory || [],
     documents: {
       total: docs.length,
       pending: docs.filter((d) => d.verificationStatus === 'Pending').length,
@@ -91,31 +97,58 @@ export const saveEducation = asyncHandler(async (req, res) => {
 });
 
 /**
- * PATCH /api/onboarding/experience — Epic 9.
- * Replaces previous-employment history and professional references.
+ * PATCH /api/onboarding/experience — wizard step 4 (previous employer).
+ * Supports notApplicable (fresher) or one+ employer rows with offer letter,
+ * 3 payslips, and service letter / FNF.
  */
 export const saveExperience = asyncHandler(async (req, res) => {
   const user = await loadSelf(req);
-  if (req.body.experienceHistory !== undefined) {
-    if (!Array.isArray(req.body.experienceHistory)) throw new ApiError(400, 'experienceHistory must be an array');
+  const notApplicable = Boolean(req.body.notApplicable);
+
+  if (notApplicable) {
+    user.previousEmployerNotApplicable = true;
+    user.experienceHistory = [];
+  } else {
+    if (!Array.isArray(req.body.experienceHistory) || req.body.experienceHistory.length === 0) {
+      throw new ApiError(400, 'Add at least one previous employer, or select Not Applicable');
+    }
+    for (const row of req.body.experienceHistory) {
+      if (!row.employerName?.trim()) throw new ApiError(400, 'Employer name is required');
+      if (!row.offerLetterFileUrl) throw new ApiError(400, 'Previous employer offer letter is required');
+      const payslips = Array.isArray(row.payslipFileUrls) ? row.payslipFileUrls.filter(Boolean) : [];
+      if (payslips.length < 3) throw new ApiError(400, 'Upload 3 previous employer payslips');
+      if (!row.serviceOrFnfFileUrl) throw new ApiError(400, 'Service letter or FNF document is required');
+      row.payslipFileUrls = payslips.slice(0, 3);
+    }
+    user.previousEmployerNotApplicable = false;
     user.experienceHistory = req.body.experienceHistory;
   }
+
   if (req.body.references !== undefined) {
     if (!Array.isArray(req.body.references)) throw new ApiError(400, 'references must be an array');
     user.references = req.body.references;
   }
+
+  advanceStage(user, 'experience');
   await user.save();
   res.status(200).json({
     success: true,
-    message: 'Experience & references saved',
+    message: notApplicable ? 'Previous employer marked as not applicable' : 'Previous employer details saved',
+    stage: user.onboardingStage,
+    previousEmployerNotApplicable: user.previousEmployerNotApplicable,
     experienceHistory: user.experienceHistory,
     references: user.references
   });
 });
 
-/** PATCH /api/onboarding/bank — wizard step 4 (final). */
+/** PATCH /api/onboarding/bank — wizard step 5 (final). */
 export const saveBank = asyncHandler(async (req, res) => {
   const user = await loadSelf(req);
+  // Require previous-employer step before bank (allows re-save once already at bank/completed).
+  const stageIdx = STAGES.indexOf(user.onboardingStage);
+  if (stageIdx < STAGES.indexOf('bank') && !experienceComplete(user)) {
+    throw new ApiError(400, 'Complete previous employer details before bank details');
+  }
   const b = req.body;
   user.employeeDetails = user.employeeDetails || {};
   user.employeeDetails.bankDetails = {

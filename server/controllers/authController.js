@@ -17,13 +17,14 @@ const toPublicUser = (user) => {
 
 /**
  * POST /api/auth/login
- * Authenticates by email + password, issues a JWT in an HTTP-only cookie.
+ * Authenticates by company code + (email OR employeeId) + password.
  * US 1.1: invalid credentials always return a generic 401 (no user enumeration).
  */
 export const login = asyncHandler(async (req, res) => {
-  const { companySlug, email, password } = req.body;
+  const { companySlug, password } = req.body;
+  const identifier = String(req.body.identifier || req.body.email || '').trim();
 
-  const genericError = new ApiError(401, 'Invalid company code, email or password');
+  const genericError = new ApiError(401, 'Invalid company code, email/Employee ID or password');
 
   // Resolve the tenant first (company code). Missing slug fails generically to
   // avoid revealing which companies exist.
@@ -34,7 +35,16 @@ export const login = asyncHandler(async (req, res) => {
   // Scope this request to the resolved tenant so the user lookup is isolated.
   setTenant({ companyId: company._id, role: null });
 
-  const user = await User.findOne({ companyId: company._id, email: email.toLowerCase().trim() });
+  let user = null;
+  if (identifier.includes('@')) {
+    user = await User.findOne({ companyId: company._id, email: identifier.toLowerCase() });
+  } else {
+    const empId = identifier.toUpperCase();
+    user = await User.findOne({ companyId: company._id, 'employeeDetails.employeeId': empId });
+    if (!user && empId !== identifier) {
+      user = await User.findOne({ companyId: company._id, 'employeeDetails.employeeId': identifier });
+    }
+  }
   if (!user) throw genericError;
 
   const matches = await user.comparePassword(password);

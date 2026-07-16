@@ -23,6 +23,18 @@ const OfferLetterSchema = new mongoose.Schema({
   pdfFileUrl: { type: String, required: true },
   signedPdfFileUrl: { type: String, default: null },
 
+  // Geometry of the acceptance Date/Signature line from PDF generation,
+  // used to bake the candidate signature and signed date in the right place.
+  acceptancePlacement: {
+    pageIndex: { type: Number, default: null },
+    dateX: { type: Number, default: null },
+    dateY: { type: Number, default: null },
+    dateValueX: { type: Number, default: null },
+    sigLabelX: { type: Number, default: null },
+    sigImageX: { type: Number, default: null },
+    sigImageY: { type: Number, default: null }
+  },
+
   digitalSignature: {
     signatureBase64: { type: String, default: null },
     signedAt: { type: Date, default: null },

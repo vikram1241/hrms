@@ -17,7 +17,7 @@ export default function Login() {
   const { status, error } = useSelector(selectAuth);
   const [form, setForm] = useState({
     companySlug: localStorage.getItem(LAST_SLUG_KEY) || COMPANY_CODE,
-    email: '',
+    identifier: '',
     password: ''
   });
   const [showPw, setShowPw] = useState(false);
@@ -27,15 +27,23 @@ export default function Login() {
   if (status === 'authenticated') return <Navigate to="/" replace />;
 
   const companyError = touched.companySlug && !form.companySlug.trim() ? 'Company code is required' : '';
-  const emailError = touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '';
+  const identifierError = touched.identifier && !form.identifier.trim()
+    ? 'Email or Employee ID is required'
+    : '';
   const pwError = touched.password && !form.password ? 'Password is required' : '';
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    setTouched({ companySlug: true, email: true, password: true });
-    if (!form.companySlug.trim() || !form.email || !form.password) return;
+    setTouched({ companySlug: true, identifier: true, password: true });
+    if (!form.companySlug.trim() || !form.identifier.trim() || !form.password) return;
     setSubmitting(true);
-    const payload = { ...form, companySlug: form.companySlug.trim().toLowerCase() };
+    const payload = {
+      companySlug: form.companySlug.trim().toLowerCase(),
+      identifier: form.identifier.trim(),
+      // Keep email for backward-compatible API clients / older servers.
+      email: form.identifier.trim(),
+      password: form.password
+    };
     const res = await dispatch(login(payload));
     setSubmitting(false);
     if (login.fulfilled.match(res)) {
@@ -89,11 +97,11 @@ export default function Login() {
               error={companyError} autoComplete="organization" autoFocus
             />
             <Input
-              id="email" type="email" label="Work email" placeholder="you@mirus.com" icon={Mail}
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              onBlur={() => setTouched((t) => ({ ...t, email: true }))}
-              error={emailError} autoComplete="email"
+              id="identifier" type="text" label="Email or Employee ID" placeholder="you@mirus.com or EMP45872" icon={Mail}
+              value={form.identifier}
+              onChange={(e) => setForm({ ...form, identifier: e.target.value })}
+              onBlur={() => setTouched((t) => ({ ...t, identifier: true }))}
+              error={identifierError} autoComplete="username"
             />
             <div>
               <Input

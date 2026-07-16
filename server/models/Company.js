@@ -24,6 +24,8 @@ const CompanySchema = new mongoose.Schema({
     letterOutlineFileName: { type: String, trim: true },
     // Pre-saved stamp + authorized-signatory signature baked onto issued PDFs.
     stampUrl: { type: String, default: null },
+    /** Combined company logo + stamp image used on letter seals when set. */
+    logoWithStampUrl: { type: String, default: null },
     signatureUrl: { type: String, default: null },
     authorizedSignatoryName: { type: String, trim: true },
     authorizedSignatoryDesignation: { type: String, trim: true }

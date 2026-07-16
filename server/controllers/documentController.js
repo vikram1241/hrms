@@ -6,6 +6,7 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { documentRelPath } from '../middleware/uploadDocument.js';
+import { logActivity } from '../services/activityService.js';
 
 // Validate the :fileId path param is a plain UUID (defends against traversal).
 const isFileId = (id) => /^[0-9a-fA-F-]{36}$/.test(id);
@@ -91,6 +92,14 @@ export const verifyDocument = asyncHandler(async (req, res) => {
   const doc = user.uploadedDocuments.find((d) => d.fileUrl === relPath);
   doc.verificationStatus = req.body.status;
   await user.save();
+  const who = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim() || user.email;
+  await logActivity({
+    actor: req.user,
+    action: `document.${String(req.body.status || '').toLowerCase()}`,
+    entityType: 'UserDocument',
+    entityId: fileId,
+    message: `${doc.documentName || doc.documentType} marked ${req.body.status} for ${who}`
+  });
 
   res.status(200).json({ success: true, message: `Document marked ${doc.verificationStatus}`, document: doc });
 });

@@ -7,11 +7,12 @@ export const updateType = (id, body) => api.put(`/uploaded-docs/types/${id}`, bo
 export const deleteType = (id) => api.delete(`/uploaded-docs/types/${id}`).then((r) => r.data);
 
 // Per-employee records
-export const uploadForEmployee = ({ userId, documentTypeId, file }) => {
+export const uploadForEmployee = ({ userId, description, documentTypeId, file }) => {
   const fd = new FormData();
   fd.append('document', file);
   fd.append('userId', userId);
-  fd.append('documentTypeId', documentTypeId);
+  fd.append('description', description);
+  if (documentTypeId) fd.append('documentTypeId', documentTypeId);
   return api.post('/uploaded-docs', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data.record);
 };
 export const myRecords = () => api.get('/uploaded-docs/mine').then((r) => r.data.data);

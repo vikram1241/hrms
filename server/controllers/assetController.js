@@ -3,12 +3,20 @@ import Asset from '../models/Asset.js';
 import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { logActivity } from '../services/activityService.js';
 
 /** POST /api/assets — register an asset. */
 export const createAsset = asyncHandler(async (req, res) => {
   const { tag, type, description, serialNumber, condition } = req.body;
   if (!tag) throw new ApiError(400, 'tag is required');
   const asset = await Asset.create({ tag, type, description, serialNumber, condition });
+  await logActivity({
+    actor: req.user,
+    action: 'asset.create',
+    entityType: 'Asset',
+    entityId: asset._id,
+    message: `Asset ${tag} registered`
+  });
   res.status(201).json({ success: true, message: 'Asset registered', asset });
 });
 
@@ -42,6 +50,14 @@ export const assignAsset = asyncHandler(async (req, res) => {
   asset.issuedAt = new Date();
   asset.returnedAt = null;
   await asset.save();
+  const who = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim() || user.email;
+  await logActivity({
+    actor: req.user,
+    action: 'asset.assign',
+    entityType: 'Asset',
+    entityId: asset._id,
+    message: `Asset ${asset.tag} assigned to ${who}`
+  });
   res.status(200).json({ success: true, message: 'Asset assigned', asset });
 });
 
@@ -70,4 +86,24 @@ export const updateAsset = asyncHandler(async (req, res) => {
   });
   await asset.save();
   res.status(200).json({ success: true, message: 'Asset updated', asset });
+});
+
+/** DELETE /api/assets/:id — remove only when not currently assigned. */
+export const deleteAsset = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid asset id');
+  const asset = await Asset.findById(req.params.id);
+  if (!asset) throw new ApiError(404, 'Asset not found');
+  if (asset.status === 'Assigned') {
+    throw new ApiError(400, 'Return the asset before deleting it');
+  }
+  const tag = asset.tag;
+  await asset.deleteOne();
+  await logActivity({
+    actor: req.user,
+    action: 'asset.delete',
+    entityType: 'Asset',
+    entityId: req.params.id,
+    message: `Asset ${tag} deleted`
+  });
+  res.status(200).json({ success: true, message: 'Asset deleted' });
 });

@@ -121,8 +121,30 @@ export default function EmployeeDetailPage() {
               render={(e) => <tr key={e._id} className="border-t border-line"><td className="py-2">{e.level}</td><td className="py-2">{e.institution}</td><td className="py-2">{e.yearOfPassing || '—'}</td><td className="py-2">{e.gradeOrPercentage || '—'}</td></tr>} />
           </Section>
           <Section title="Previous experience">
-            <Table head={['Employer', 'Designation', 'From', 'To']} rows={user.experienceHistory} empty="No experience records."
-              render={(x) => <tr key={x._id} className="border-t border-line"><td className="py-2">{x.employerName}</td><td className="py-2">{x.designation || '—'}</td><td className="py-2">{fmt(x.fromDate)}</td><td className="py-2">{fmt(x.toDate)}</td></tr>} />
+            {user.previousEmployerNotApplicable ? (
+              <p className="text-sm text-muted">Not applicable (no previous employer).</p>
+            ) : (
+              <Table
+                head={['Employer', 'Designation', 'From', 'To', 'Docs']}
+                rows={user.experienceHistory}
+                empty="No experience records."
+                render={(x) => (
+                  <tr key={x._id} className="border-t border-line">
+                    <td className="py-2">{x.employerName}</td>
+                    <td className="py-2">{x.designation || '—'}</td>
+                    <td className="py-2">{fmt(x.fromDate)}</td>
+                    <td className="py-2">{fmt(x.toDate)}</td>
+                    <td className="py-2 text-xs text-muted">
+                      {[
+                        x.offerLetterFileUrl && 'Offer',
+                        (x.payslipFileUrls || []).length ? `${x.payslipFileUrls.length} payslips` : null,
+                        x.serviceOrFnfFileUrl && 'Service/FNF'
+                      ].filter(Boolean).join(' · ') || '—'}
+                    </td>
+                  </tr>
+                )}
+              />
+            )}
           </Section>
           <Section title="References">
             <Table head={['Name', 'Company', 'Phone']} rows={user.references} empty="No references."

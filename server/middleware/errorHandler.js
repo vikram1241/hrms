@@ -1,9 +1,21 @@
 import multer from 'multer';
 import ApiError from '../utils/ApiError.js';
+import { MAX_TRAINING_VIDEO_MB } from './uploadVideo.js';
 
 /** 404 fallback for unmatched routes. */
 export const notFound = (req, res, next) => {
   next(new ApiError(404, `Route not found: ${req.method} ${req.originalUrl}`));
+};
+
+const multerSizeMessage = (req) => {
+  const url = String(req?.originalUrl || req?.path || '');
+  if (url.includes('/training/')) {
+    return `Video exceeds the ${MAX_TRAINING_VIDEO_MB}MB limit. Allowed formats: MP4, WEBM, or MOV.`;
+  }
+  if (url.includes('/documents') || url.includes('/uploaded-docs') || url.includes('/performance/')) {
+    return 'File exceeds the 5MB limit. Only PDF documents are accepted.';
+  }
+  return 'File exceeds the maximum allowed size';
 };
 
 /**
@@ -18,7 +30,7 @@ export const errorHandler = (err, req, res, next) => {
 
   if (err instanceof multer.MulterError) {
     statusCode = 400;
-    message = err.code === 'LIMIT_FILE_SIZE' ? 'File exceeds the 2MB limit' : err.message;
+    message = err.code === 'LIMIT_FILE_SIZE' ? multerSizeMessage(req) : err.message;
   } else if (err.name === 'ValidationError') {
     statusCode = 400;
     message = 'Validation failed';

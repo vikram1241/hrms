@@ -7,6 +7,7 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { fillAcroFormPdf } from '../services/pdfService.js';
+import { logActivity } from '../services/activityService.js';
 
 // ---------- DocumentType configuration (HR: doctype:manage) ----------
 
@@ -19,9 +20,17 @@ export const createType = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, message: 'Document type created', type });
 });
 
-/** GET /api/uploaded-docs/types */
+/** GET /api/uploaded-docs/types — active types by default (hides soft-deleted). */
 export const listTypes = asyncHandler(async (req, res) => {
-  const types = await DocumentType.find(req.query.active === 'true' ? { active: true } : {}).sort({ section: 1, name: 1 });
+  const filter = {};
+  if (req.query.all === 'true') {
+    // no active filter — include soft-deleted
+  } else if (req.query.active === 'false') {
+    filter.active = false;
+  } else {
+    filter.active = true;
+  }
+  const types = await DocumentType.find(filter).sort({ section: 1, name: 1 });
   res.status(200).json({ success: true, data: types });
 });
 
@@ -50,26 +59,43 @@ export const deleteType = asyncHandler(async (req, res) => {
 // ---------- Per-employee records ----------
 
 /**
- * POST /api/uploaded-docs — HR uploads a PDF for an employee against a type
- * (Epic 17). Multipart: field "document" (PDF) + body { userId, documentTypeId }.
+ * POST /api/uploaded-docs — HR uploads a PDF for an employee.
+ * Multipart: field "document" (PDF) + body { userId, description, documentTypeId? }.
  */
 export const uploadForEmployee = asyncHandler(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'No PDF uploaded (field "document")');
   const { userId, documentTypeId } = req.body;
+  const description = String(req.body.description || '').trim();
   if (!mongoose.isValidObjectId(userId)) throw new ApiError(400, 'Valid userId is required');
-  if (!mongoose.isValidObjectId(documentTypeId)) throw new ApiError(400, 'Valid documentTypeId is required');
+  if (!description) throw new ApiError(400, 'description is required');
 
-  const [user, type] = await Promise.all([User.findById(userId), DocumentType.findById(documentTypeId)]);
+  const user = await User.findById(userId);
   if (!user) throw new ApiError(404, 'Employee not found');
-  if (!type) throw new ApiError(404, 'Document type not found');
+
+  let type = null;
+  if (documentTypeId) {
+    if (!mongoose.isValidObjectId(documentTypeId)) throw new ApiError(400, 'Valid documentTypeId is required');
+    type = await DocumentType.findById(documentTypeId);
+    if (!type) throw new ApiError(404, 'Document type not found');
+  }
 
   const record = await EmployeeDocumentRecord.create({
     userId: user._id,
-    documentTypeId: type._id,
-    section: type.section,
-    accessMode: type.kind,
+    documentTypeId: type?._id || null,
+    description,
+    section: type?.section || 'General',
+    accessMode: type?.kind || 'read',
     sourceFileUrl: `uploads/documents/${req.file.filename}`,
     uploadedBy: req.user._id
+  });
+
+  const who = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim() || user.email;
+  await logActivity({
+    actor: req.user,
+    action: 'document.upload',
+    entityType: 'EmployeeDocumentRecord',
+    entityId: record._id,
+    message: `Document "${description}" uploaded for ${who}`
   });
 
   res.status(201).json({ success: true, message: 'Document uploaded and assigned', record });

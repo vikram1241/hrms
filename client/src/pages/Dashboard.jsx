@@ -1,20 +1,14 @@
 import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
-import { Users, FileClock, ReceiptText, FileCheck2, TrendingUp } from 'lucide-react';
+import { Users, FileClock, ReceiptText, FileCheck2, TrendingUp, Activity } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader.jsx';
 import { Card, CardHeader, CardBody } from '../components/ui/Card.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
+import EmptyState from '../components/ui/EmptyState.jsx';
 import useAsync from '../hooks/useAsync.js';
-import { getDashboardStats } from '../api/dashboard.js';
+import { getDashboardStats, getDashboardActivity } from '../api/dashboard.js';
 import { selectUser } from '../features/auth/authSlice.js';
 import { MONTHS } from '../config/constants.js';
-
-const ACTIVITY = [
-  { time: '10:15 AM', text: 'Rahul Kumar accepted offer letter (EMP45872)', tone: 'bg-success' },
-  { time: '09:00 AM', text: 'Bulk ingestion parser completed: 14 candidates', tone: 'bg-info' },
-  { time: 'Yesterday', text: "New Salary Model 'Engineering-V2' created", tone: 'bg-primary-500' },
-  { time: 'Yesterday', text: 'Priya Sharma issued payslips for the month', tone: 'bg-warning' }
-];
 
 function StatCard({ icon: Icon, label, value, sub, tone, to, loading }) {
   const inner = (
@@ -34,6 +28,7 @@ export default function Dashboard() {
   const user = useSelector(selectUser);
   const firstName = user?.personalDetails?.firstName || 'Admin';
   const { data: stats, loading } = useAsync(() => getDashboardStats(), []);
+  const { data: activity, loading: activityLoading } = useAsync(() => getDashboardActivity(8), []);
 
   const period = stats?.slipsPeriod ? `${MONTHS.find((m) => m.value === stats.slipsPeriod.month)?.label} ${stats.slipsPeriod.year}` : '';
 
@@ -56,14 +51,29 @@ export default function Dashboard() {
         <Card className="lg:col-span-2">
           <CardHeader title="Recent Activity" subtitle="Latest events across the portal" />
           <CardBody className="p-0">
-            <ul className="divide-y divide-line">
-              {ACTIVITY.map((a, i) => (
-                <li key={i} className="flex items-start gap-3 px-5 py-4">
-                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.tone}`} />
-                  <div className="flex-1"><p className="text-sm text-ink">{a.text}</p><p className="text-xs text-muted">{a.time}</p></div>
-                </li>
-              ))}
-            </ul>
+            {activityLoading ? (
+              <div className="flex justify-center py-10"><Spinner size={28} className="text-primary-600" /></div>
+            ) : !activity?.length ? (
+              <EmptyState
+                icon={Activity}
+                title="No activity yet"
+                message="Actions like sending offers, issuing payslips, and verifying documents will appear here."
+              />
+            ) : (
+              <ul className="divide-y divide-line">
+                {activity.map((a) => (
+                  <li key={a.id} className="flex items-start gap-3 px-5 py-4">
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.tone || 'bg-primary-500'}`} />
+                    <div className="flex-1">
+                      <p className="text-sm text-ink">{a.message}</p>
+                      <p className="text-xs text-muted">
+                        {a.time}{a.actorName ? ` · ${a.actorName}` : ''}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardBody>
         </Card>
 
@@ -78,9 +88,9 @@ export default function Dashboard() {
               { label: 'Create Offer Letter', to: '/offers' },
               { label: 'Review Documents', to: '/verifications' },
               { label: 'Generate Payslips', to: '/payslips' }
-            ].map((q) => (
-              <Link key={q.to} to={q.to} className="flex items-center justify-between rounded-lg border border-line px-4 py-3 text-sm font-medium text-ink transition hover:border-primary-300 hover:bg-primary-50">
-                {q.label}<span className="text-primary-600">→</span>
+            ].map((l) => (
+              <Link key={l.to} to={l.to} className="block rounded-lg border border-line px-4 py-3 text-sm font-medium text-ink hover:border-primary-300 hover:bg-primary-50/40">
+                {l.label}
               </Link>
             ))}
           </CardBody>

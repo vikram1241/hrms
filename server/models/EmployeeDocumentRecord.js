@@ -10,7 +10,9 @@ import tenantScope from './plugins/tenantScope.js';
 const EmployeeDocumentRecordSchema = new mongoose.Schema({
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  documentTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'DocumentType', required: true, index: true },
+  /** Optional catalog type; free-text description is the primary label. */
+  documentTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'DocumentType', default: null, index: true },
+  description: { type: String, required: true, trim: true },
   section: { type: String, trim: true }, // denormalized from the type for easy grouping
   accessMode: { type: String, enum: ['read', 'write'], required: true },
 

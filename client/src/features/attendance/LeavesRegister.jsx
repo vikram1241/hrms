@@ -7,7 +7,9 @@ import { Card, CardBody } from '../../components/ui/Card.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import Spinner from '../../components/ui/Spinner.jsx';
 import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
+import TablePager from '../../components/ui/TablePager.jsx';
 import useAsync from '../../hooks/useAsync.js';
+import useClientPager from '../../hooks/useClientPager.js';
 import { listLeaves, decideLeave } from '../../api/attendance.js';
 import { notifyError } from '../ui/toastSlice.js';
 import { userDisplayName, toDateKey } from './dateHelpers.js';
@@ -57,6 +59,7 @@ export default function LeavesRegister({ onDecided }) {
   };
 
   const rows = leaves.data || [];
+  const pager = useClientPager(rows, 10);
   const summary = useMemo(() => {
     const s = { Pending: 0, Approved: 0, Rejected: 0, Cancelled: 0 };
     for (const l of rows) if (s[l.status] !== undefined) s[l.status] += 1;
@@ -110,7 +113,7 @@ export default function LeavesRegister({ onDecided }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((l) => (
+                {pager.pageRows.map((l) => (
                   <tr key={l._id} className="border-t border-line">
                     <td className="py-2">
                       <p className="font-medium text-ink">{userDisplayName(l.userId)}</p>
@@ -150,12 +153,20 @@ export default function LeavesRegister({ onDecided }) {
                     </td>
                   </tr>
                 ))}
-                {!rows.length && (
+                {!pager.total && (
                   <tr><td colSpan={8} className="py-8 text-center text-muted">No leave requests match these filters.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+        )}
+        {!leaves.loading && (
+          <TablePager
+            page={pager.page} pages={pager.pages} total={pager.total} limit={pager.limit}
+            showingCount={pager.pageRows.length}
+            onPageChange={pager.setPage}
+            onLimitChange={pager.setLimit}
+          />
         )}
 
         {leaves.error && (

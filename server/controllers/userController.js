@@ -18,6 +18,7 @@ import { generateToken } from '../utils/tokens.js';
 import { sendPasswordSetup } from '../services/emailService.js';
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
+import { logActivity } from '../services/activityService.js';
 
 const SETUP_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const displayName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email;
@@ -40,7 +41,7 @@ const toPublicUser = (user) => {
 export const listUsers = asyncHandler(async (req, res) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
-  const { search, role, status, department, includeDeleted } = req.query;
+  const { search, role, status, department, includeDeleted, employeesOnly } = req.query;
 
   const filter = {};
   if (includeDeleted !== 'true') filter.deletedAt = null;
@@ -48,6 +49,11 @@ export const listUsers = asyncHandler(async (req, res) => {
   if (department) filter['employeeDetails.department'] = department;
   if (status === 'active') filter.isActive = true;
   if (status === 'inactive') filter.isActive = false;
+  // Provisioned employees only (offer accepted + credentials issued → employeeId assigned).
+  if (employeesOnly === 'true' || employeesOnly === '1') {
+    filter['employeeDetails.employeeId'] = { $exists: true, $nin: [null, ''] };
+    filter.isActive = true;
+  }
 
   if (search && search.trim()) {
     const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -190,6 +196,13 @@ export const softDeleteUser = asyncHandler(async (req, res) => {
   user.deletedAt = new Date();
   user.isActive = false;
   await user.save();
+  await logActivity({
+    actor: req.user,
+    action: 'user.delete',
+    entityType: 'User',
+    entityId: user._id,
+    message: `User ${displayName(user)} soft-deleted`
+  });
 
   res.status(200).json({ success: true, message: 'User soft-deleted' });
 });

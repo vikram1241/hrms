@@ -7,6 +7,9 @@ import {
   updateOfferStatus,
   approveOffer,
   downloadOfferPdf,
+  sendOfferEmail,
+  regenerateOffer,
+  deleteOffer,
   resendOffer,
   getMyOffer,
   downloadMyOfferPdf
@@ -36,6 +39,9 @@ router.get('/:id', requirePermission(PERMISSIONS.OFFER_READ), getOffer);
 router.get('/:id/pdf', requirePermission(PERMISSIONS.OFFER_READ), downloadOfferPdf);
 router.patch('/:id/status', requirePermission(PERMISSIONS.OFFER_MANAGE), offerStatusRules, validate, updateOfferStatus);
 router.post('/:id/approve', requirePermission(PERMISSIONS.OFFER_APPROVE), approveOffer);
+router.post('/:id/send', requirePermission(PERMISSIONS.OFFER_MANAGE), sendOfferEmail);
+router.post('/:id/regenerate', requirePermission(PERMISSIONS.OFFER_MANAGE), regenerateOffer);
 router.post('/:id/resend', requirePermission(PERMISSIONS.OFFER_MANAGE), resendOffer);
+router.delete('/:id', requirePermission(PERMISSIONS.OFFER_MANAGE), deleteOffer);
 
 export default router;

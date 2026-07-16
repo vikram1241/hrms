@@ -3,7 +3,7 @@ import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import { Plus, Pencil, Trash2, FileText, Eye, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, FileText, Eye, Upload, Mail } from 'lucide-react';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Spinner from '../../components/ui/Spinner.jsx';
@@ -22,17 +22,22 @@ import {
 } from '../../api/letterTemplates.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
-const emptyForm = (type) => ({
-  _id: null,
-  type,
-  name: '',
-  title: '',
-  body: '',
-  isDefault: false,
-  active: true,
-  file: null,
-  existingFileName: null
-});
+const emptyForm = (type, emailDefaults = {}) => {
+  const mail = emailDefaults[type] || {};
+  return {
+    _id: null,
+    type,
+    name: '',
+    title: '',
+    body: '',
+    emailSubject: mail.subject || '',
+    emailBody: mail.body || '',
+    isDefault: false,
+    active: true,
+    file: null,
+    existingFileName: null
+  };
+};
 
 export default function LetterTemplatesSection() {
   const dispatch = useDispatch();
@@ -46,20 +51,26 @@ export default function LetterTemplatesSection() {
 
   const templates = data?.data || [];
   const placeholders = data?.meta?.placeholders || [];
+  const emailDefaults = data?.meta?.emailDefaults || {};
   const byType = (t) => templates.filter((x) => x.type === t);
 
-  const openCreate = (type) => setForm(emptyForm(type));
-  const openEdit = (t) => setForm({
-    _id: t._id,
-    type: t.type,
-    name: t.name,
-    title: t.title || '',
-    body: (t.bodyParagraphs || []).join('\n'),
-    isDefault: Boolean(t.isDefault),
-    active: t.active !== false,
-    file: null,
-    existingFileName: t.originalFileName || (t.hasFile ? 'Uploaded PDF' : null)
-  });
+  const openCreate = (type) => setForm(emptyForm(type, emailDefaults));
+  const openEdit = (t) => {
+    const mail = emailDefaults[t.type] || {};
+    setForm({
+      _id: t._id,
+      type: t.type,
+      name: t.name,
+      title: t.title || '',
+      body: (t.bodyParagraphs || []).join('\n'),
+      emailSubject: t.emailSubject || mail.subject || '',
+      emailBody: t.emailBody || mail.body || '',
+      isDefault: Boolean(t.isDefault),
+      active: t.active !== false,
+      file: null,
+      existingFileName: t.originalFileName || (t.hasFile ? 'Uploaded PDF' : null)
+    });
+  };
 
   const save = async (e) => {
     e.preventDefault();
@@ -72,6 +83,8 @@ export default function LetterTemplatesSection() {
     fd.append('title', form.title.trim());
     fd.append('isDefault', String(form.isDefault));
     fd.append('active', String(form.active));
+    fd.append('emailSubject', form.emailSubject.trim());
+    fd.append('emailBody', form.emailBody);
     fd.append('bodyParagraphs', JSON.stringify(
       form.body.split('\n').map((s) => s.trim()).filter(Boolean)
     ));
@@ -107,7 +120,8 @@ export default function LetterTemplatesSection() {
   return (
     <div>
       <p className="mb-4 text-sm text-muted">
-        Upload a default letterhead PDF per letter type (same pattern as C&amp;F). At generate time, blank fields are filled and the company seal is applied. Mark one template as default per type.
+        Upload a default letterhead PDF per letter type. Configure the email subject and body with placeholders —
+        they are filled when you generate a letter, and the PDF is attached. Mark one template as default per type.
       </p>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -131,6 +145,12 @@ export default function LetterTemplatesSection() {
                           {t.isDefault && <StatusBadge status="active" label="Default" />}
                           <StatusBadge status={t.active ? 'active' : 'inactive'} />
                         </p>
+                        {(t.emailSubject || emailDefaults[type]?.subject) && (
+                          <p className="mt-1 flex items-center gap-1 truncate text-[11px] text-muted">
+                            <Mail size={11} className="shrink-0 text-primary-600" />
+                            <span className="truncate">{t.emailSubject || emailDefaults[type]?.subject}</span>
+                          </p>
+                        )}
                       </div>
                       <div className="flex shrink-0 gap-0.5">
                         {t.hasFile && (
@@ -195,13 +215,42 @@ export default function LetterTemplatesSection() {
               size="small"
               fullWidth
               multiline
-              minRows={4}
-              label="Body fallback (one paragraph per line, used if PDF has no form fields)"
+              minRows={3}
+              label="Letter body fallback (one paragraph per line)"
               value={form.body}
               onChange={(e) => setForm({ ...form, body: e.target.value })}
             />
+
+            <div className="rounded-lg border border-line p-3">
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink">
+                <Mail size={15} className="text-primary-600" /> Email (sent with letter PDF attached)
+              </p>
+              <div className="space-y-3">
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Email subject"
+                  placeholder="Your employment offer from {{companyName}}"
+                  value={form.emailSubject}
+                  onChange={(e) => setForm({ ...form, emailSubject: e.target.value })}
+                />
+                <TextField
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={5}
+                  label="Email body"
+                  placeholder="Hi {{employeeName}}, …"
+                  value={form.emailBody}
+                  onChange={(e) => setForm({ ...form, emailBody: e.target.value })}
+                  helperText="Plain text. Placeholders are filled when the letter is generated."
+                />
+              </div>
+            </div>
+
             <div className="rounded-lg bg-surface p-2 text-xs text-muted">
-              <span className="font-medium text-ink">Placeholders:</span> {placeholders.map((p) => `{{${p}}}`).join('  ')}
+              <span className="font-medium text-ink">Placeholders:</span>{' '}
+              {placeholders.map((p) => `{{${p}}}`).join('  ')}
             </div>
             <FormControlLabel
               control={<Checkbox checked={form.isDefault} onChange={(e) => setForm({ ...form, isDefault: e.target.checked })} size="small" />}

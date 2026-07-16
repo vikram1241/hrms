@@ -13,6 +13,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import TemplateDialog from './TemplateDialog.jsx';
 import LetterTemplatesSection from './LetterTemplatesSection.jsx';
 import CFTemplatesSection from './CFTemplatesSection.jsx';
+import JobRolesSection from './JobRolesSection.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { listTemplates, deactivateTemplate } from '../../api/salary.js';
 import { CALC_TYPES } from '../../config/constants.js';
@@ -46,20 +47,23 @@ export default function TemplatesPage() {
     <div>
       <PageHeader
         title="Setup Templates"
-        subtitle="Salary models, HR letter templates and C&F agreement templates"
+        subtitle="Salary models, job titles, HR letter templates and C&F agreement templates"
         actions={tab === 0 ? <Button onClick={() => setDialog({ open: true, template: null })}><Plus size={16} /> New Salary Model</Button> : null}
       />
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Salary Structures" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Roles" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Letter Templates" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="C&F Templates" sx={{ textTransform: 'none', fontWeight: 600 }} />
       </Tabs>
 
-      {tab === 2 ? (
+      {tab === 3 ? (
         <CFTemplatesSection />
-      ) : tab === 1 ? (
+      ) : tab === 2 ? (
         <LetterTemplatesSection />
+      ) : tab === 1 ? (
+        <JobRolesSection />
       ) : loading ? (
         <div className="flex justify-center py-20"><Spinner size={32} className="text-primary-600" /></div>
       ) : !templates?.length ? (

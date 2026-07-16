@@ -37,9 +37,9 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRE:-7d}
       # Public SPA URL used in offer / password emails. Point this at the same
       # domain (and port 80 / https) that maps to the client nginx container —
-      # NOT Vite :5173. Example: http://hrms-mirus.com
-      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost}
-      CLIENT_ORIGINS: ${CLIENT_ORIGINS:-}
+      # NOT Vite :5173.
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://hrms-mirus.com}
+      CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://hrms-mirus.com}
       COOKIE_NAME: ${COOKIE_NAME:-hrms_token}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@hrms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
@@ -52,8 +52,11 @@ services:
       mongodb:
         condition: service_healthy
     volumes:
-      - ./server/uploads:/app/uploads
-      - ./server/logs:/app/logs
+      # Persist all uploaded files across rebuilds/redeploys (documents, training
+      # videos, company images/avatars, offers, payslips, etc.). Override with an
+      # absolute host path in production, e.g. HRMS_UPLOADS_PATH=/var/lib/hrms/uploads
+      - ${HRMS_UPLOADS_PATH:-./data/uploads}:/app/uploads
+      - ${HRMS_LOGS_PATH:-./data/logs}:/app/logs
     networks:
       - hrms-network
     restart: unless-stopped

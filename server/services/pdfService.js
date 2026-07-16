@@ -25,7 +25,7 @@ const ascii = (s) => String(s ?? '').replace(/[^\x20-\xFF]/g, '');
 
 const relPath = (absPath) => path.relative(ROOT, absPath).split(path.sep).join('/');
 
-const loadImage = async (doc, relMaybe) => {
+const resolveAssetPath = (relMaybe) => {
   if (!relMaybe) return null;
   const candidates = [
     path.resolve(ROOT, relMaybe),
@@ -33,17 +33,179 @@ const loadImage = async (doc, relMaybe) => {
     path.resolve('/app', relMaybe)
   ];
   for (const abs of candidates) {
-    if (!fs.existsSync(abs)) continue;
-    try {
-      const bytes = await fsp.readFile(abs);
-      const lower = abs.toLowerCase();
-      if (lower.endsWith('.png')) return await doc.embedPng(bytes);
-      return await doc.embedJpg(bytes);
-    } catch {
-      /* try next path / format */
-    }
+    if (fs.existsSync(abs)) return abs;
   }
   return null;
+};
+
+const loadImage = async (doc, relMaybe) => {
+  const abs = resolveAssetPath(relMaybe);
+  if (!abs) return null;
+  try {
+    const bytes = await fsp.readFile(abs);
+    const lower = abs.toLowerCase();
+    if (lower.endsWith('.png')) return await doc.embedPng(bytes);
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return await doc.embedJpg(bytes);
+    // Non-image path (e.g. PDF letterhead) — skip; caller may use loadOutlinePage.
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Load Company letter outline/template as a full-page background (PDF page 1 or image).
+ * @returns {Promise<{ kind: 'pdf'|'image', embedded: any }|null>}
+ */
+const loadOutlinePage = async (doc, relMaybe) => {
+  const abs = resolveAssetPath(relMaybe);
+  if (!abs) return null;
+  const lower = abs.toLowerCase();
+  try {
+    if (lower.endsWith('.pdf')) {
+      const bytes = await fsp.readFile(abs);
+      const [embedded] = await doc.embedPdf(bytes, [0]);
+      return { kind: 'pdf', embedded };
+    }
+    const img = await loadImage(doc, relMaybe);
+    if (!img) return null;
+    return { kind: 'image', embedded: img };
+  } catch {
+    return null;
+  }
+};
+
+/** A4 page geometry used by every generated company document. */
+export const PAGE_W = 595;
+export const PAGE_H = 842;
+export const PAGE_MARGIN_X = 48;
+
+/**
+ * Shared company page chrome for all generated PDFs.
+ * Prefer Company Settings → letter outline/template as the full-page background;
+ * otherwise draw logo/letterhead + watermark + address footer.
+ */
+const createCompanyPageKit = async (doc, company, { font, bold } = {}) => {
+  const bodyFont = font || await doc.embedFont(StandardFonts.Helvetica);
+  const boldFont = bold || await doc.embedFont(StandardFonts.HelveticaBold);
+  const brand = rgb(0.12, 0.22, 0.45);
+  const white = rgb(1, 1, 1);
+
+  const companyName = company?.name || 'Company';
+  const addr = company?.address || {};
+  const addrLine = [
+    companyName,
+    [addr.street, addr.city, addr.state, addr.country || 'India', addr.zipCode].filter(Boolean).join(', ')
+  ].filter(Boolean).join(', ');
+  const statutoryBits = [
+    company?.statutory?.cin ? `CIN: ${company.statutory.cin}` : null,
+    company?.statutory?.gstin ? `GSTIN: ${company.statutory.gstin}` : null
+  ].filter(Boolean).join('; ');
+  const contactBits = [
+    company?.contactEmail || null,
+    company?.hr?.email || null
+  ].filter(Boolean).join('; ');
+
+  const outline = await loadOutlinePage(doc, company?.branding?.letterOutlineUrl);
+  const logo = await loadImage(doc, company?.branding?.logoUrl);
+  const letterheadImg = await loadImage(doc, company?.branding?.letterheadUrl);
+
+  const contentTopY = outline ? 722 : 730;
+  const contentBottomY = outline ? 78 : 68;
+  const footerH = 56;
+  const MARGIN_X = PAGE_MARGIN_X;
+
+  const drawOutline = (p) => {
+    if (!outline) return;
+    if (outline.kind === 'pdf') {
+      p.drawPage(outline.embedded, { x: 0, y: 0, width: PAGE_W, height: PAGE_H });
+      return;
+    }
+    p.drawImage(outline.embedded, { x: 0, y: 0, width: PAGE_W, height: PAGE_H });
+  };
+
+  const drawWatermark = (p) => {
+    if (outline || !logo) return;
+    const d = logo.scaleToFit(360, 360);
+    p.drawImage(logo, {
+      x: (PAGE_W - d.width) / 2,
+      y: (PAGE_H - d.height) / 2 - 20,
+      width: d.width,
+      height: d.height,
+      opacity: 0.12
+    });
+  };
+
+  const drawHeader = (p) => {
+    if (outline) return contentTopY;
+    if (letterheadImg) {
+      const d = letterheadImg.scaleToFit(520, 72);
+      p.drawImage(letterheadImg, {
+        x: (PAGE_W - d.width) / 2,
+        y: PAGE_H - 14 - d.height,
+        width: d.width,
+        height: d.height
+      });
+      return Math.min(contentTopY, PAGE_H - 28 - d.height);
+    }
+    if (logo) {
+      const d = logo.scaleToFit(170, 64);
+      p.drawImage(logo, {
+        x: PAGE_W - 40 - d.width,
+        y: PAGE_H - 18 - d.height,
+        width: d.width,
+        height: d.height
+      });
+      return Math.min(contentTopY, PAGE_H - 30 - d.height);
+    }
+    p.drawText(ascii(companyName), { x: 280, y: 800, size: 12, font: boldFont, color: brand });
+    return 780;
+  };
+
+  const drawFooter = (p) => {
+    if (outline) return;
+    p.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: footerH, color: brand });
+    const line1 = ascii(addrLine).slice(0, 118);
+    const line2 = ascii(statutoryBits).slice(0, 118);
+    const line3 = ascii(contactBits).slice(0, 118);
+    let fy = 38;
+    if (line1) { p.drawText(line1, { x: 28, y: fy, size: 6.5, font: bodyFont, color: white }); fy -= 12; }
+    if (line2) { p.drawText(line2, { x: 28, y: fy, size: 6.5, font: bodyFont, color: white }); fy -= 12; }
+    if (line3) p.drawText(line3, { x: 28, y: fy, size: 6.5, font: bodyFont, color: white });
+  };
+
+  const decoratePage = (p) => {
+    if (outline) {
+      drawOutline(p);
+      return contentTopY;
+    }
+    drawWatermark(p);
+    const top = drawHeader(p);
+    drawFooter(p);
+    return top;
+  };
+
+  const addDecoratedPage = () => {
+    const page = doc.addPage([PAGE_W, PAGE_H]);
+    const top = decoratePage(page);
+    return { page, y: top - 10 };
+  };
+
+  return {
+    PAGE_W,
+    PAGE_H,
+    MARGIN_X,
+    CONTENT_WIDTH: PAGE_W - MARGIN_X * 2,
+    contentTopY,
+    contentBottomY,
+    companyName,
+    font: bodyFont,
+    bold: boldFont,
+    brand,
+    hasOutline: Boolean(outline),
+    decoratePage,
+    addDecoratedPage
+  };
 };
 
 const wrapText = (str, max) => {
@@ -56,6 +218,52 @@ const wrapText = (str, max) => {
   }
   if (cur) lines.push(cur);
   return lines;
+};
+
+/** Wrap mixed plain/bold segments to a max width using font metrics. */
+const wrapRichSegments = (segments, maxWidth, size, font, boldFont) => {
+  const words = [];
+  for (const seg of segments) {
+    const parts = ascii(seg.text).split(/(\s+)/).filter((p) => p.length);
+    for (const p of parts) words.push({ text: p, bold: Boolean(seg.bold) });
+  }
+  const lines = [];
+  let cur = [];
+  let curW = 0;
+  for (const w of words) {
+    const f = w.bold ? boldFont : font;
+    const ww = f.widthOfTextAtSize(w.text, size);
+    if (cur.length && curW + ww > maxWidth && !/^\s+$/.test(w.text)) {
+      lines.push(cur);
+      cur = [];
+      curW = 0;
+    }
+    if (!cur.length && /^\s+$/.test(w.text)) continue;
+    cur.push(w);
+    curW += ww;
+  }
+  if (cur.length) lines.push(cur);
+  return lines;
+};
+
+/** Mark a dynamic value so template substitution can bold it later. */
+const BOLD_OPEN = '\uE000';
+const BOLD_CLOSE = '\uE001';
+const boldMark = (value) => `${BOLD_OPEN}${ascii(value)}${BOLD_CLOSE}`;
+
+const parseBoldMarks = (str) => {
+  const segments = [];
+  const re = new RegExp(`${BOLD_OPEN}([\\s\\S]*?)${BOLD_CLOSE}`, 'g');
+  let last = 0;
+  let m;
+  const s = String(str ?? '');
+  while ((m = re.exec(s))) {
+    if (m.index > last) segments.push({ text: s.slice(last, m.index), bold: false });
+    segments.push({ text: m[1], bold: true });
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) segments.push({ text: s.slice(last), bold: false });
+  return segments.length ? segments : [{ text: s, bold: false }];
 };
 
 const formatOfferDate = (d) => {
@@ -74,51 +282,80 @@ const firstNameOf = (fullName) => {
 const amountCell = (paisa) => formatINR(paisa, { symbol: '', decimals: false }).trim();
 
 /**
- * Render a SalarySlip document to a print-ready A4 PDF.
+ * Render a SalarySlip document to a print-ready A4 PDF on the company page template.
  * @returns {Promise<string>} repo-relative path to the written file.
  */
-export const generatePayslipPdf = async (slip) => {
+export const generatePayslipPdf = async (slip, company = null) => {
   const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const black = rgb(0.1, 0.1, 0.1);
-  let y = 800;
+  const kit = await createCompanyPageKit(doc, company, { font, bold });
+  const ink = rgb(0.1, 0.1, 0.1);
+  let { page, y } = kit.addDecoratedPage();
 
   const text = (s, x, opts = {}) =>
-    page.drawText(ascii(s), { x, y: opts.y ?? y, size: opts.size ?? 10, font: opts.bold ? bold : font, color: black });
+    page.drawText(ascii(s), {
+      x,
+      y: opts.y ?? y,
+      size: opts.size ?? 10,
+      font: opts.bold ? bold : font,
+      color: ink
+    });
 
-  text('Mirus Med Sciences', 40, { size: 18, bold: true });
-  text(`Payslip for ${MONTHS[slip.month]} ${slip.year}`, 40, { y: 778, size: 12, bold: true });
-  page.drawLine({ start: { x: 40, y: 770 }, end: { x: 555, y: 770 }, thickness: 1, color: black });
+  text(`Payslip for ${MONTHS[slip.month]} ${slip.year}`, kit.MARGIN_X, { size: 13, bold: true });
+  y -= 20;
+  page.drawLine({
+    start: { x: kit.MARGIN_X, y: y + 6 },
+    end: { x: PAGE_W - kit.MARGIN_X, y: y + 6 },
+    thickness: 1,
+    color: ink
+  });
+  y -= 16;
 
-  y = 750;
   const meta = slip.metaSnapshot;
   [
     [`Employee: ${meta.fullName} (${meta.employeeDisplayId})`, `Department: ${meta.department}`],
     [`Designation: ${meta.designation}`, `PAN: ${meta.pan || '-'}`],
     [`UAN: ${meta.uan || '-'}`, `Bank A/C: ${meta.bankAccountHidden || '-'}`]
-  ].forEach((row) => { text(row[0], 40); text(row[1], 320); y -= 18; });
+  ].forEach((row) => {
+    text(row[0], kit.MARGIN_X);
+    text(row[1], 320);
+    y -= 18;
+  });
 
   y -= 10;
-  text('Earnings', 40, { bold: true }); text('Deductions', 320, { bold: true });
+  text('Earnings', kit.MARGIN_X, { bold: true });
+  text('Deductions', 320, { bold: true });
   y -= 16;
   const startY = y;
-  slip.earningsLedger.forEach((e) => { text(e.label, 40); text(formatINR(e.amount), 230); y -= 15; });
+  slip.earningsLedger.forEach((e) => {
+    text(e.label, kit.MARGIN_X);
+    text(formatINR(e.amount), 230);
+    y -= 15;
+  });
   const earningsEndY = y;
   y = startY;
-  slip.deductionsLedger.forEach((d) => { text(d.label, 320); text(formatINR(d.amount), 500); y -= 15; });
+  slip.deductionsLedger.forEach((d) => {
+    text(d.label, 320);
+    text(formatINR(d.amount), 500);
+    y -= 15;
+  });
   y = Math.min(earningsEndY, y) - 12;
 
-  page.drawLine({ start: { x: 40, y: y + 6 }, end: { x: 555, y: y + 6 }, thickness: 0.5, color: black });
-  text(`Gross Earnings: ${formatINR(slip.financialSummary.grossEarnings)}`, 40, { bold: true });
+  page.drawLine({
+    start: { x: kit.MARGIN_X, y: y + 6 },
+    end: { x: PAGE_W - kit.MARGIN_X, y: y + 6 },
+    thickness: 0.5,
+    color: ink
+  });
+  text(`Gross Earnings: ${formatINR(slip.financialSummary.grossEarnings)}`, kit.MARGIN_X, { bold: true });
   text(`Total Deductions: ${formatINR(slip.financialSummary.totalDeductions)}`, 320, { bold: true });
   y -= 22;
-  text(`Net Pay: ${formatINR(slip.financialSummary.netPay)}`, 40, { size: 12, bold: true });
+  text(`Net Pay: ${formatINR(slip.financialSummary.netPay)}`, kit.MARGIN_X, { size: 12, bold: true });
   y -= 16;
-  text(`(${slip.financialSummary.netPayInWords})`, 40, { size: 9 });
+  text(`(${slip.financialSummary.netPayInWords})`, kit.MARGIN_X, { size: 9 });
   y -= 30;
-  text('This is a system-generated payslip and does not require a signature.', 40, { size: 8 });
+  text('This is a system-generated payslip and does not require a signature.', kit.MARGIN_X, { size: 8 });
 
   const file = path.join(PAYSLIP_DIR, `payslip-${slip.employeeId}-${slip.year}-${String(slip.month).padStart(2, '0')}.pdf`);
   await fsp.writeFile(file, await doc.save());
@@ -126,14 +363,14 @@ export const generatePayslipPdf = async (slip) => {
 };
 
 /**
- * Render an offer letter PDF in the Mirus Med Sciences layout (Kamalakar sample):
- * - Company letter header / logo (from Company Settings branding)
- * - Faint logo watermark on every page
- * - Footer with address + GSTIN/CIN
- * - HR details block + Director stamp/signature from Company Settings
+ * Render an offer letter PDF aligned to the Mirus reference layout:
+ * - Optional company letter outline/template as full-page background
+ * - Otherwise: logo header, faint watermark, address/CIN/GST footer
+ * - Inserted candidate/offer values bolded (print-safe highlight)
+ * - HR block (left) + Director stamp/logo seal (right)
  * - Salary table from the frozen breakdown of the salary structure template
  *
- * @returns {Promise<string>} repo-relative path to the written file.
+ * @returns {Promise<{ pdfFileUrl: string, acceptancePlacement: object }>}
  */
 export const generateOfferLetterPdf = async ({
   fullName,
@@ -154,34 +391,27 @@ export const generateOfferLetterPdf = async ({
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const kit = await createCompanyPageKit(doc, company, { font, bold });
+  const {
+    MARGIN_X, CONTENT_WIDTH, contentBottomY, companyName, brand
+  } = kit;
   const ink = rgb(0.12, 0.12, 0.14);
   const muted = rgb(0.35, 0.35, 0.38);
-  const brand = rgb(0.12, 0.22, 0.45);
   const headerBg = rgb(0.86, 0.92, 0.97);
 
-  const companyName = company?.name || 'Mirus Med Sciences Private Limited';
   const addr = company?.address || {};
-  const addrLine = [
-    companyName,
-    [addr.street, addr.city, addr.state, addr.country || 'India', addr.zipCode].filter(Boolean).join(', ')
-  ].filter(Boolean).join(', ');
-  const statutoryBits = [
-    company?.statutory?.cin ? `CIN: ${company.statutory.cin}` : null,
-    company?.statutory?.gstin ? `GSTIN: ${company.statutory.gstin}` : null
-  ].filter(Boolean).join('; ');
-  const contactBits = [
-    company?.contactEmail || null,
-    company?.hr?.email || null
-  ].filter(Boolean).join('; ');
-
   const jobLocation = location || [addr.city, addr.state].filter(Boolean).join(', ') || 'Hyderabad, Telangana';
   const offerDt = offerDate || new Date();
   const joinDt = joiningDate || offerDt;
   const acceptDt = acceptByDate || joinDt;
   const firstName = firstNameOf(fullName);
+  const offerDateStr = formatOfferDate(offerDt);
+  const joinDateStr = formatOfferDate(joinDt);
+  const acceptDateStr = formatOfferDate(acceptDt);
+  const ctcStr = formatINR(annualCTC);
+  const ctcWords = paisaToWords(annualCTC);
 
-  const logo = await loadImage(doc, company?.branding?.logoUrl);
-  const letterheadImg = await loadImage(doc, company?.branding?.letterheadUrl);
+  const logoWithStamp = await loadImage(doc, company?.branding?.logoWithStampUrl);
   const stamp = await loadImage(doc, company?.branding?.stampUrl);
   const sigImg = await loadImage(doc, company?.branding?.signatureUrl);
 
@@ -189,152 +419,197 @@ export const generateOfferLetterPdf = async ({
   const hrTitle = (company?.hr?.designation || '').trim();
   const hrContact = (company?.hr?.contact || '').trim();
   const hrEmail = (company?.hr?.email || company?.contactEmail || '').trim();
-  const directorName = (company?.branding?.authorizedSignatoryName || '').trim();
-  const directorTitle = (company?.branding?.authorizedSignatoryDesignation || 'Director').trim();
+  const directorTitle = (company?.branding?.authorizedSignatoryDesignation || 'Director').trim() || 'Director';
 
-  let page = doc.addPage([595, 842]);
-  let y = 780;
-
-  const drawWatermark = (p) => {
-    if (!logo) return;
-    const d = logo.scaleToFit(360, 360);
-    p.drawImage(logo, {
-      x: (595 - d.width) / 2,
-      y: (842 - d.height) / 2 - 20,
-      width: d.width,
-      height: d.height,
-      opacity: 0.12
-    });
-  };
-
-  const drawHeader = (p) => {
-    if (letterheadImg) {
-      const d = letterheadImg.scaleToFit(520, 72);
-      p.drawImage(letterheadImg, {
-        x: (595 - d.width) / 2,
-        y: 842 - 14 - d.height,
-        width: d.width,
-        height: d.height
-      });
-      return 842 - 26 - d.height;
-    }
-    if (logo) {
-      const d = logo.scaleToFit(170, 64);
-      p.drawImage(logo, {
-        x: 595 - 40 - d.width,
-        y: 842 - 18 - d.height,
-        width: d.width,
-        height: d.height,
-        opacity: 1
-      });
-      return 842 - 30 - d.height;
-    }
-    p.drawText(ascii(companyName), { x: 280, y: 800, size: 12, font: bold, color: brand });
-    return 780;
-  };
-
-  const drawFooter = (p) => {
-    p.drawRectangle({ x: 0, y: 0, width: 595, height: 46, color: brand });
-    const footer1 = ascii(addrLine);
-    const footer2 = ascii([statutoryBits, contactBits].filter(Boolean).join('  |  '));
-    p.drawText(footer1.slice(0, 115), { x: 28, y: 28, size: 6.5, font, color: rgb(1, 1, 1) });
-    if (footer2) p.drawText(footer2.slice(0, 120), { x: 28, y: 14, size: 6.5, font, color: rgb(1, 1, 1) });
-  };
-
-  const decoratePage = (p) => {
-    drawWatermark(p);
-    const contentTop = drawHeader(p);
-    drawFooter(p);
-    return contentTop;
-  };
+  let { page, y } = kit.addDecoratedPage();
+  let pageIndex = 0;
 
   const newPage = () => {
-    page = doc.addPage([595, 842]);
-    y = decoratePage(page) - 12;
+    ({ page, y } = kit.addDecoratedPage());
+    pageIndex += 1;
   };
 
   const ensure = (need = 60) => {
-    if (y < need + 50) newPage();
+    if (y < contentBottomY + need) newPage();
   };
 
   const write = (text, opts = {}) => {
     const size = opts.size ?? 10;
     const f = opts.bold ? bold : font;
     const color = opts.color || ink;
-    const x = opts.x ?? 48;
-    const maxChars = opts.maxChars ?? 92;
+    const x = opts.x ?? MARGIN_X;
+    const maxChars = opts.maxChars ?? 90;
     const gap = opts.gap ?? (size + 5);
     for (const ln of wrapText(text, maxChars)) {
-      ensure(size + 50);
+      ensure(size + 8);
       page.drawText(ascii(ln), { x, y, size, font: f, color });
       y -= gap;
     }
   };
 
-  y = decoratePage(page) - 8;
+  const writeRich = (segmentsOrMarked, opts = {}) => {
+    const size = opts.size ?? 10;
+    const color = opts.color || ink;
+    const x = opts.x ?? MARGIN_X;
+    const maxWidth = opts.maxWidth ?? CONTENT_WIDTH;
+    const gap = opts.gap ?? (size + 5);
+    const segments = typeof segmentsOrMarked === 'string'
+      ? parseBoldMarks(segmentsOrMarked)
+      : segmentsOrMarked;
+    const lines = wrapRichSegments(segments, maxWidth, size, font, bold);
+    for (const line of lines) {
+      ensure(size + 8);
+      let cx = x;
+      for (const seg of line) {
+        const f = seg.bold ? bold : font;
+        const t = ascii(seg.text);
+        if (!t) continue;
+        page.drawText(t, { x: cx, y, size, font: f, color });
+        cx += f.widthOfTextAtSize(t, size);
+      }
+      y -= gap;
+    }
+  };
 
-  page.drawText(ascii(formatOfferDate(offerDt)), { x: 420, y, size: 10, font, color: ink });
-  y -= 22;
+  const drawAmount = (value, xRight, size, useBold = false) => {
+    const t = ascii(value);
+    const f = useBold ? bold : font;
+    const w = f.widthOfTextAtSize(t, size);
+    page.drawText(t, { x: xRight - w, y, size, font: f, color: ink });
+  };
 
-  write(fullName, { bold: true, size: 11, gap: 14 });
-  if (phone) write(String(phone), { size: 10, gap: 13 });
-  if (candidateEmail) write(String(candidateEmail), { size: 10, gap: 13 });
-  if (city) write(city, { size: 10, gap: 18 });
-  else y -= 6;
+  // Date (right) — value bold
+  {
+    const label = 'Date: ';
+    const value = offerDateStr;
+    const size = 10;
+    const totalW = font.widthOfTextAtSize(label, size) + bold.widthOfTextAtSize(value, size);
+    const x0 = PAGE_W - MARGIN_X - totalW;
+    page.drawText(label, { x: x0, y, size, font, color: ink });
+    page.drawText(ascii(value), {
+      x: x0 + font.widthOfTextAtSize(label, size),
+      y,
+      size,
+      font: bold,
+      color: ink
+    });
+  }
+  y -= 24;
 
-  write(`Dear ${firstName},`, { size: 11, gap: 16 });
+  writeRich([{ text: fullName, bold: true }], { size: 11, gap: 15 });
+  if (phone) {
+    writeRich([
+      { text: 'Ph: ', bold: false },
+      { text: phone, bold: true }
+    ], { size: 10, gap: 14 });
+  }
+  if (candidateEmail) {
+    writeRich([
+      { text: 'email: ', bold: false },
+      { text: candidateEmail, bold: true }
+    ], { size: 10, gap: 14 });
+  }
+  if (city) writeRich([{ text: city, bold: true }], { size: 10, gap: 14 });
+  y -= 18;
+
+  // Main title — underlined, centered (reference style).
+  ensure(44);
+  const title = 'OFFER LETTER';
+  const titleSize = 14;
+  const titleWidth = bold.widthOfTextAtSize(title, titleSize);
+  const titleX = (PAGE_W - titleWidth) / 2;
+  page.drawText(title, { x: titleX, y, size: titleSize, font: bold, color: brand });
+  page.drawLine({
+    start: { x: titleX, y: y - 3 },
+    end: { x: titleX + titleWidth, y: y - 3 },
+    thickness: 1,
+    color: brand
+  });
+  y -= 28;
+
+  writeRich([
+    { text: 'Dear ', bold: false },
+    { text: firstName, bold: true },
+    { text: ',', bold: false }
+  ], { size: 11, gap: 18 });
 
   const defaultParas = [
-    `We are pleased to extend this Offer of Employment for the position of ${position} in our organization, based at ${jobLocation}.`,
-    `We were impressed with your profile, experience, and the interview discussions. We believe your skills and enthusiasm will be a valuable addition to our ${department || 'team'}. As a ${position}, you will play a key role in delivering business outcomes and contributing to the achievement of targets in your assigned territory. This position offers good growth opportunities within the organization for high performers.`
+    `We are pleased to extend this Offer of Employment for the position of ${boldMark(position)} in our organization, based at ${boldMark(jobLocation)}.`,
+    `We were impressed with your profile, experience, and the interview discussions. We believe your skills and enthusiasm will be a valuable addition to our ${boldMark(department || 'team')}. As a ${boldMark(position)}, you will play a key role in delivering business outcomes and contributing to the achievement of targets in your assigned territory. This position offers good growth opportunities within the organization for high performers.`
   ];
   const paras = Array.isArray(bodyParagraphs) && bodyParagraphs.length
     ? bodyParagraphs.map((p) => String(p)
-      .replace(/\{\{employeeName\}\}/g, fullName)
-      .replace(/\{\{designation\}\}/g, position)
-      .replace(/\{\{department\}\}/g, department || '')
-      .replace(/\{\{companyName\}\}/g, companyName)
-      .replace(/\{\{joiningDate\}\}/g, formatOfferDate(joinDt))
-      .replace(/\{\{offerDate\}\}/g, formatOfferDate(offerDt))
-      .replace(/\{\{ctc\}\}/g, formatINR(annualCTC))
-      .replace(/\{\{location\}\}/g, jobLocation))
+      .replace(/\{\{employeeName\}\}/g, boldMark(fullName))
+      .replace(/\{\{designation\}\}/g, boldMark(position))
+      .replace(/\{\{department\}\}/g, boldMark(department || ''))
+      .replace(/\{\{companyName\}\}/g, boldMark(companyName))
+      .replace(/\{\{joiningDate\}\}/g, boldMark(joinDateStr))
+      .replace(/\{\{offerDate\}\}/g, boldMark(offerDateStr))
+      .replace(/\{\{ctc\}\}/g, boldMark(ctcStr))
+      .replace(/\{\{location\}\}/g, boldMark(jobLocation)))
     : defaultParas;
 
   for (const para of paras) {
-    write(para, { size: 10, gap: 13 });
-    y -= 6;
+    writeRich(para, { size: 10, gap: 14 });
+    y -= 8;
   }
 
-  write('Key Terms of the Offer:', { bold: true, size: 11, gap: 16 });
-  write(`1. Date of Joining: on or before ${formatOfferDate(joinDt)}.`, { size: 10, gap: 14 });
-  write(`2. Location: ${jobLocation}.`, { size: 10, gap: 14 });
-  write(
-    `3. Compensation: Your compensation has been structured as per industry standards for the role of ${position}. It includes a competitive fixed component along with performance-linked incentives. The detailed breakup is as follows:`,
-    { size: 10, gap: 14 }
-  );
   y -= 4;
+  write('Key Terms of the Offer:', { bold: true, size: 11, gap: 18 });
+  writeRich([
+    { text: '1. Date of Joining: on or before ', bold: true },
+    { text: joinDateStr, bold: true },
+    { text: '.', bold: false }
+  ], { size: 10, gap: 16 });
+  writeRich([
+    { text: '2. Location: ', bold: false },
+    { text: jobLocation, bold: true },
+    { text: '.', bold: false }
+  ], { size: 10, gap: 16 });
+  writeRich([
+    { text: '3. Compensation: ', bold: true },
+    { text: 'Your compensation has been structured as per industry standards for the role of ', bold: false },
+    { text: position, bold: true },
+    { text: '. It includes a competitive fixed component along with performance-linked incentives. The detailed breakup is as follows:', bold: false }
+  ], { size: 10, gap: 14 });
+  y -= 8;
 
-  ensure(160);
-  const tableX = 48;
-  const col2X = 420;
-  const tableW = 500;
+  // Prefer salary table on a fresh page when remaining space is tight (reference flow).
+  const earningsCount = (breakdown?.earnings || []).length;
+  const pfRows = (breakdown?.deductions || []).filter((x) =>
+    /pf|provident|esi|employer/i.test(`${x.key || ''} ${x.label || ''}`)
+  ).length;
+  const tableRows = earningsCount + pfRows + 4; // header + gross + total + incentives
+  const tableNeed = 28 + tableRows * 20 + 24;
+  if (y < contentBottomY + tableNeed + 40) newPage();
+  else ensure(tableNeed);
+
+  const tableX = MARGIN_X;
+  const tableW = CONTENT_WIDTH;
+  const colAmtRight = tableX + tableW - 12;
   const rowH = 18;
 
   page.drawRectangle({ x: tableX, y: y - 4, width: tableW, height: rowH + 2, color: headerBg });
   page.drawText('Particulars', { x: tableX + 8, y, size: 10, font: bold, color: ink });
-  page.drawText('Amount (INR)', { x: col2X, y, size: 10, font: bold, color: ink });
+  page.drawText('Amount (INR)', {
+    x: colAmtRight - bold.widthOfTextAtSize('Amount (INR)', 10),
+    y,
+    size: 10,
+    font: bold,
+    color: ink
+  });
   y -= rowH + 4;
 
   for (const e of (breakdown?.earnings || [])) {
     ensure(40);
     page.drawText(ascii(e.label), { x: tableX + 8, y, size: 10, font, color: ink });
-    page.drawText(ascii(amountCell(e.monthlyAmount)), { x: col2X, y, size: 10, font, color: ink });
+    drawAmount(amountCell(e.monthlyAmount), colAmtRight, 10, true);
     y -= rowH;
   }
 
   ensure(40);
   page.drawText('Gross Month Salary', { x: tableX + 8, y, size: 10, font: bold, color: ink });
-  page.drawText(ascii(amountCell(breakdown?.grossEarnings || 0)), { x: col2X, y, size: 10, font: bold, color: ink });
+  drawAmount(amountCell(breakdown?.grossEarnings || 0), colAmtRight, 10, true);
   y -= rowH;
 
   for (const d of (breakdown?.deductions || []).filter((x) =>
@@ -342,100 +617,187 @@ export const generateOfferLetterPdf = async ({
   )) {
     ensure(40);
     page.drawText(ascii(d.label), { x: tableX + 8, y, size: 10, font, color: ink });
-    page.drawText(ascii(amountCell(d.monthlyAmount)), { x: col2X, y, size: 10, font, color: ink });
+    drawAmount(amountCell(d.monthlyAmount), colAmtRight, 10, true);
     y -= rowH;
   }
 
   const monthlyCtc = Math.round(Number(annualCTC || 0) / 12);
   ensure(40);
   page.drawText('Total CTC (Monthly)', { x: tableX + 8, y, size: 10, font: bold, color: ink });
-  page.drawText(ascii(amountCell(monthlyCtc)), { x: col2X, y, size: 10, font: bold, color: ink });
+  drawAmount(amountCell(monthlyCtc), colAmtRight, 10, true);
   y -= rowH;
 
   ensure(40);
   page.drawText('Incentives / Performance Bonus', { x: tableX + 8, y, size: 10, font, color: ink });
-  page.drawText('As per Company incentive scheme', { x: col2X - 40, y, size: 9, font, color: muted });
-  y -= rowH + 10;
+  page.drawText('As per Company incentive scheme', {
+    x: colAmtRight - font.widthOfTextAtSize('As per Company incentive scheme', 9),
+    y,
+    size: 9,
+    font,
+    color: muted
+  });
+  y -= rowH + 14;
 
-  write(
-    `Annual CTC (Cost to Company) will be approximately ${formatINR(annualCTC)} (${paisaToWords(annualCTC)}) subject to statutory deductions.`,
-    { bold: true, size: 10, gap: 14 }
-  );
-  write(
-    'Travel / Conveyance: Reimbursement of actual expenses as per Company policy (with supporting bills).',
-    { bold: true, size: 10, gap: 16 }
-  );
+  writeRich([
+    { text: 'Annual CTC (Cost to Company) will be approximately ', bold: true },
+    { text: ctcStr, bold: true },
+    { text: ' (', bold: true },
+    { text: ctcWords, bold: true },
+    { text: ') subject to statutory deductions.', bold: true }
+  ], { size: 10, gap: 15 });
+  writeRich([
+    { text: 'Travel / Conveyance: ', bold: true },
+    { text: 'Reimbursement of actual expenses as per Company policy (with supporting bills).', bold: false }
+  ], { size: 10, gap: 18 });
 
-  write('4. Probation Period: 6 (Six) months from the date of joining.', { size: 10, gap: 14 });
-  write('5. Other Conditions:', { size: 10, gap: 14 });
-  write('- This offer is subject to successful background verification and medical fitness test.', { size: 10, gap: 13, x: 56, maxChars: 88 });
-  write('- Your employment will be governed by the rules and policies of the Company.', { size: 10, gap: 13, x: 56, maxChars: 88 });
-  write('- You will be required to sign the standard Service Agreement / Confidentiality Agreement on joining.', { size: 10, gap: 16, x: 56, maxChars: 88 });
+  writeRich([
+    { text: '4. Probation Period: ', bold: true },
+    { text: '6 (Six) months from the date of joining.', bold: false }
+  ], { size: 10, gap: 16 });
+  write('5. Other Conditions:', { bold: true, size: 10, gap: 15 });
+  write('- This offer is subject to successful background verification and medical fitness test.', {
+    size: 10, gap: 14, x: 56, maxChars: 86
+  });
+  write('- Your employment will be governed by the rules and policies of the Company.', {
+    size: 10, gap: 14, x: 56, maxChars: 86
+  });
+  write('- You will be required to sign the standard Service Agreement / Confidentiality Agreement on joining.', {
+    size: 10, gap: 16, x: 56, maxChars: 86
+  });
 
-  write(
-    `Please convey your acceptance by signing and returning the duplicate copy of this letter on or before ${formatOfferDate(acceptDt)}. Upon acceptance, we will issue the formal Appointment Letter.`,
-    { size: 10, gap: 16 }
-  );
-  write('We look forward to your positive response and a long, mutually beneficial association.', { size: 10, gap: 24 });
+  writeRich([
+    { text: 'Please convey your acceptance by signing and returning the duplicate copy of this letter on or before ', bold: false },
+    { text: acceptDateStr, bold: true },
+    { text: '. Upon acceptance, we will issue the formal Appointment Letter.', bold: false }
+  ], { size: 10, gap: 16 });
+  y -= 6;
+  write('We look forward to your positive response and a long, mutually beneficial association.', {
+    size: 10, gap: 22
+  });
 
-  // Closing: HR details (left) + Director stamp/signature (right)
-  ensure(200);
+  // Closing: Best regards + HR (left) + Director stamp/logo (right) — reference page 3.
+  ensure(210);
   const closeTop = y;
 
-  write('HR Details', { bold: true, size: 10, gap: 14 });
-  if (hrName) write(hrName, { bold: true, size: 10, gap: 13 });
-  if (hrTitle) write(hrTitle, { size: 10, gap: 12 });
-  if (hrContact) write(`Contact: ${hrContact}`, { size: 9, gap: 12, color: muted });
-  if (hrEmail) write(`Email: ${hrEmail}`, { size: 9, gap: 12, color: muted });
+  write('Best regards,', { bold: true, size: 10, gap: 15 });
+  if (hrName) write(hrName, { bold: true, size: 10, gap: 14 });
+  if (hrTitle) write(hrTitle, { bold: true, size: 10, gap: 14 });
+  if (hrContact) write(`Contact: ${hrContact}`, { bold: true, size: 10, gap: 14 });
+  if (hrEmail) write(hrEmail, { bold: true, size: 10, gap: 14 });
   if (!hrName && !hrTitle && !hrContact && !hrEmail) {
-    write('(Configure HR Name, Designation, Contact and Email in Company Settings)', { size: 8, gap: 12, color: muted });
+    write('(Configure HR details in Company Settings)', { size: 8, gap: 12, color: muted });
   }
 
-  const sealY = closeTop - 10;
-  if (sigImg) {
-    const d = sigImg.scaleToFit(150, 52);
-    page.drawImage(sigImg, { x: 360, y: sealY - d.height, width: d.width, height: d.height });
+  // Director seal on the right — prefer combined logo+stamp; else stamp with signature overlay.
+  const sealBoxX = 380;
+  const sealBoxW = 170;
+  let sealBottom = closeTop;
+  if (logoWithStamp) {
+    const d = logoWithStamp.scaleToFit(120, 120);
+    const sx = sealBoxX + (sealBoxW - d.width) / 2;
+    const sy = closeTop - d.height;
+    page.drawImage(logoWithStamp, { x: sx, y: sy, width: d.width, height: d.height, opacity: 0.96 });
+    sealBottom = sy;
+  } else {
+    if (stamp) {
+      const d = stamp.scaleToFit(110, 110);
+      const sx = sealBoxX + (sealBoxW - d.width) / 2;
+      const sy = closeTop - d.height;
+      page.drawImage(stamp, { x: sx, y: sy, width: d.width, height: d.height, opacity: 0.94 });
+      sealBottom = sy;
+    }
+    if (sigImg) {
+      const d = sigImg.scaleToFit(140, 48);
+      const sx = sealBoxX + (sealBoxW - d.width) / 2;
+      const sy = Math.max(sealBottom + 20, closeTop - 70);
+      page.drawImage(sigImg, { x: sx, y: sy, width: d.width, height: d.height });
+      sealBottom = Math.min(sealBottom, sy);
+    }
   }
-  if (stamp) {
-    const d = stamp.scaleToFit(95, 95);
-    page.drawImage(stamp, {
-      x: 470,
-      y: sealY - d.height - (sigImg ? 8 : 0),
-      width: d.width,
-      height: d.height,
-      opacity: 0.92
+  {
+    const label = ascii(directorTitle);
+    const lw = bold.widthOfTextAtSize(label, 10);
+    page.drawText(label, {
+      x: sealBoxX + (sealBoxW - lw) / 2,
+      y: sealBottom - 16,
+      size: 10,
+      font: bold,
+      color: ink
+    });
+    sealBottom -= 16;
+  }
+
+  y = Math.min(y, sealBottom - 40);
+
+  // Acceptance block — leave clear space under the Director seal (reference rhythm).
+  ensure(150);
+  y -= 12;
+  {
+    const acc = 'Acceptance of Offer';
+    const accSize = 12;
+    const aw = bold.widthOfTextAtSize(acc, accSize);
+    const ax = (PAGE_W - aw) / 2;
+    page.drawText(acc, { x: ax, y, size: accSize, font: bold, color: ink });
+    page.drawLine({
+      start: { x: ax, y: y - 3 },
+      end: { x: ax + aw, y: y - 3 },
+      thickness: 1,
+      color: ink
     });
   }
-  page.drawText(ascii(directorName || 'Authorized Signatory'), {
-    x: 360, y: sealY - 70, size: 9, font: bold, color: ink
+  y -= 24;
+  write('I have read and understood the terms of the Offer and hereby accept the same.', {
+    size: 10, gap: 22
   });
-  page.drawText(ascii(directorTitle), {
-    x: 360, y: sealY - 84, size: 8, font, color: muted
-  });
-
-  y = Math.min(y, sealY - 110);
-
-  ensure(150);
-  write('Acceptance of Offer', { bold: true, size: 11, gap: 16 });
-  write('I have read and understood the terms of the Offer and hereby accept the same.', { size: 10, gap: 20 });
-  page.drawText(ascii(`Name: ${fullName}`), { x: 48, y, size: 10, font, color: ink });
-  y -= 22;
-  page.drawText('Date: ____________________', { x: 48, y, size: 10, font, color: ink });
-  y -= 28;
-  page.drawText('Candidate Signature:', { x: 48, y, size: 10, font: bold, color: ink });
-  page.drawLine({ start: { x: 180, y: y - 2 }, end: { x: 400, y: y - 2 }, thickness: 1, color: ink });
+  writeRich([
+    { text: 'Name: ', bold: true },
+    { text: fullName, bold: true }
+  ], { size: 10, gap: 20 });
+  let acceptancePlacement;
+  {
+    // Date (left) + Signature (right) on one line — reference acceptance block.
+    const datePrefix = 'Date: ';
+    const dateBlank = '____________________';
+    const sigPrefix = 'Signature: ';
+    const sigBlank = '___________________________';
+    const dateLabel = datePrefix + dateBlank;
+    const sigLabel = sigPrefix + sigBlank;
+    page.drawText(dateLabel, { x: MARGIN_X, y, size: 10, font: bold, color: ink });
+    const sw = bold.widthOfTextAtSize(sigLabel, 10);
+    const sigLabelX = PAGE_W - MARGIN_X - sw;
+    page.drawText(sigLabel, {
+      x: sigLabelX,
+      y,
+      size: 10,
+      font: bold,
+      color: ink
+    });
+    const dateValueX = MARGIN_X + bold.widthOfTextAtSize(datePrefix, 10);
+    const sigImageX = sigLabelX + bold.widthOfTextAtSize(sigPrefix, 10);
+    // Image sits on the underscore blank, slightly above the text baseline.
+    acceptancePlacement = {
+      pageIndex,
+      dateX: MARGIN_X,
+      dateY: y,
+      dateValueX,
+      sigLabelX,
+      sigImageX,
+      sigImageY: y - 4
+    };
+  }
 
   const file = path.join(OFFER_DIR, `offer-${crypto.randomUUID()}.pdf`);
   await fsp.writeFile(file, await doc.save());
-  return relPath(file);
+  return { pdfFileUrl: relPath(file), acceptancePlacement };
 };
 
 /**
  * Bake a candidate's drawn signature (base64 PNG, optionally a data URL) onto
- * the offer PDF at the reserved signature zone, plus a name/timestamp caption.
+ * the offer PDF beside the Signature label, and fill the Date blank with the
+ * signature date.
  * @returns {Promise<string>} repo-relative path to the signed file.
  */
-export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { name, signedAt }) => {
+export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { name, signedAt, acceptancePlacement } = {}) => {
   const sourceAbs = path.resolve(ROOT, sourceRelPath);
   if (!fs.existsSync(sourceAbs)) throw new ApiError(404, 'Source offer PDF not found');
 
@@ -450,13 +812,63 @@ export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { nam
   const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
   const png = await doc.embedPng(pngBytes);
   const pages = doc.getPages();
-  const page = pages[pages.length - 1];
-  const dims = png.scaleToFit(180, 60);
-  page.drawImage(png, { x: 185, y: 70, width: dims.width, height: dims.height });
+  const pageIdx = Number.isInteger(acceptancePlacement?.pageIndex)
+    ? Math.min(Math.max(acceptancePlacement.pageIndex, 0), pages.length - 1)
+    : pages.length - 1;
+  const page = pages[pageIdx];
 
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const font = await doc.embedFont(StandardFonts.Helvetica);
-  page.drawText(ascii(`Signed by ${name} on ${new Date(signedAt).toISOString()}`), {
-    x: 48, y: 55, size: 8, font, color: rgb(0.3, 0.3, 0.3)
+  const ink = rgb(0.12, 0.12, 0.14);
+
+  // Prefer geometry captured at generation; fall back to right-side acceptance band.
+  const dateY = acceptancePlacement?.dateY ?? 140;
+  const dateValueX = acceptancePlacement?.dateValueX ?? (PAGE_MARGIN_X + bold.widthOfTextAtSize('Date: ', 10));
+  const sigImageX = acceptancePlacement?.sigImageX
+    ?? (PAGE_W - PAGE_MARGIN_X - bold.widthOfTextAtSize('___________________________', 10));
+  const sigImageY = acceptancePlacement?.sigImageY ?? (dateY - 4);
+
+  const signedDateStr = formatOfferDate(signedAt);
+
+  // Cover the Date underscore blank, then write the signed date.
+  page.drawRectangle({
+    x: dateValueX - 1,
+    y: dateY - 2,
+    width: bold.widthOfTextAtSize('____________________', 10) + 2,
+    height: 14,
+    color: rgb(1, 1, 1)
+  });
+  page.drawText(ascii(signedDateStr), {
+    x: dateValueX,
+    y: dateY,
+    size: 10,
+    font: bold,
+    color: ink
+  });
+
+  // Cover the Signature underscore, then draw the signature image on that blank.
+  const dims = png.scaleToFit(150, 42);
+  page.drawRectangle({
+    x: sigImageX - 1,
+    y: sigImageY - 2,
+    width: Math.max(dims.width, bold.widthOfTextAtSize('___________________________', 10)) + 2,
+    height: Math.max(dims.height, 16) + 4,
+    color: rgb(1, 1, 1)
+  });
+  page.drawImage(png, {
+    x: sigImageX,
+    y: sigImageY,
+    width: dims.width,
+    height: dims.height
+  });
+
+  // Small caption under the acceptance line for audit trail.
+  page.drawText(ascii(`Signed by ${name}`), {
+    x: PAGE_MARGIN_X,
+    y: Math.max(dateY - 16, 40),
+    size: 8,
+    font,
+    color: rgb(0.35, 0.35, 0.38)
   });
 
   const file = path.join(SIGNED_OFFER_DIR, `signed-${crypto.randomUUID()}.pdf`);
@@ -469,65 +881,95 @@ export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { nam
 
 /**
  * Generate a company-issued statutory document (appointment letter, NDA,
- * handbook acknowledgment, code of conduct) as a PDF, sealed with the company
- * stamp + authorized-signatory signature when configured (Epic 10 + C).
+ * handbook acknowledgment, code of conduct) as a PDF on the company page
+ * template, sealed with stamp + authorized-signatory signature when configured.
  *
  * @param {{ title, paragraphs:string[], company, employeeName, designation, effectiveDate }} args
  * @returns {Promise<string>} repo-relative path to the generated file.
  */
 export const generateCompanyDocPdf = async ({ title, paragraphs, company, employeeName, designation, effectiveDate }) => {
   const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const black = rgb(0.1, 0.1, 0.1);
-  let y = 800;
-  const write = (s, x = 40, opts = {}) => {
-    page.drawText(ascii(s), { x, y, size: opts.size ?? 11, font: opts.bold ? bold : font, color: opts.color || black });
-    y -= opts.gap ?? 18;
+  const kit = await createCompanyPageKit(doc, company, { font, bold });
+  const ink = rgb(0.1, 0.1, 0.1);
+  const muted = rgb(0.3, 0.3, 0.3);
+  let { page, y } = kit.addDecoratedPage();
+
+  const ensure = (need = 40) => {
+    if (y < kit.contentBottomY + need) ({ page, y } = kit.addDecoratedPage());
+  };
+  const write = (s, opts = {}) => {
+    const size = opts.size ?? 11;
+    const f = opts.bold ? bold : font;
+    const x = opts.x ?? kit.MARGIN_X;
+    const maxChars = opts.maxChars ?? 92;
+    const gap = opts.gap ?? 18;
+    for (const ln of wrapText(s, maxChars)) {
+      ensure(size + 8);
+      page.drawText(ascii(ln), { x, y, size, font: f, color: opts.color || ink });
+      y -= gap;
+    }
   };
 
-  const companyName = company?.name || 'Company';
-  const letterheadImg = await loadImage(doc, company?.branding?.letterheadUrl);
-  const logo = await loadImage(doc, company?.branding?.logoUrl);
-  if (letterheadImg) {
-    const d = letterheadImg.scaleToFit(520, 56);
-    page.drawImage(letterheadImg, { x: (595 - d.width) / 2, y: 842 - 18 - d.height, width: d.width, height: d.height });
-    y = 842 - 28 - d.height - 12;
-  } else if (logo) {
-    const d = logo.scaleToFit(120, 48);
-    page.drawImage(logo, { x: 40, y: 792, width: d.width, height: d.height });
-    write(companyName, 170, { size: 18, bold: true, gap: 26 });
-  } else {
-    write(companyName, 40, { size: 18, bold: true, gap: 26 });
+  write(String(title || 'Document').toUpperCase(), { size: 13, bold: true, gap: 22 });
+  write(`Date: ${new Date(effectiveDate || Date.now()).toDateString()}`, { size: 10, gap: 16 });
+  if (employeeName) {
+    write(`To: ${employeeName}${designation ? `, ${designation}` : ''}`, { size: 10, gap: 20 });
   }
-  write(title.toUpperCase(), 40, { size: 13, bold: true, gap: 26 });
-  write(`Date: ${new Date(effectiveDate || Date.now()).toDateString()}`);
-  if (employeeName) write(`To: ${employeeName}${designation ? `, ${designation}` : ''}`, 40, { gap: 24 });
 
   for (const para of paragraphs || []) {
-    for (const ln of wrapText(para, 95)) write(ln, 40, { size: 10, gap: 15 });
-    y -= 8;
+    write(para, { size: 10, gap: 14, maxChars: 90 });
+    y -= 6;
   }
 
-  // HR details (when configured) above the authorized seal.
+  ensure(200);
+  const sealTop = y;
   const hrName = company?.hr?.name;
   if (hrName) {
-    write(hrName, 40, { size: 10, bold: true, gap: 14 });
-    if (company.hr.designation) write(company.hr.designation, 40, { size: 9, gap: 12 });
-    if (company.hr.contact) write(company.hr.contact, 40, { size: 9, gap: 12 });
-    if (company.hr.email) write(company.hr.email, 40, { size: 9, gap: 16 });
+    write(hrName, { size: 10, bold: true, gap: 14 });
+    if (company.hr.designation) write(company.hr.designation, { size: 9, gap: 12 });
+    if (company.hr.contact) write(company.hr.contact, { size: 9, gap: 12 });
+    if (company.hr.email) write(company.hr.email, { size: 9, gap: 16 });
   }
 
-  // Seal: stamp (right) + signature (left) near the bottom.
+  const logoWithStamp = await loadImage(doc, company?.branding?.logoWithStampUrl);
   const stamp = await loadImage(doc, company?.branding?.stampUrl);
-  if (stamp) { const d = stamp.scaleToFit(100, 100); page.drawImage(stamp, { x: 420, y: 120, width: d.width, height: d.height, opacity: 0.9 }); }
   const sig = await loadImage(doc, company?.branding?.signatureUrl);
-  if (sig) { const d = sig.scaleToFit(150, 50); page.drawImage(sig, { x: 40, y: 150, width: d.width, height: d.height }); }
-  page.drawLine({ start: { x: 40, y: 145 }, end: { x: 220, y: 145 }, thickness: 1, color: black });
-  page.drawText(ascii(`Authorized Signatory: ${company?.branding?.authorizedSignatoryName || ''}`), { x: 40, y: 130, size: 9, font, color: black });
+  const sealX = 400;
+  let sealBottom = sealTop;
+  if (logoWithStamp) {
+    const d = logoWithStamp.scaleToFit(110, 110);
+    page.drawImage(logoWithStamp, {
+      x: sealX, y: sealTop - d.height, width: d.width, height: d.height, opacity: 0.95
+    });
+    sealBottom = sealTop - d.height;
+  } else if (stamp) {
+    const d = stamp.scaleToFit(100, 100);
+    page.drawImage(stamp, {
+      x: sealX + 10, y: sealTop - d.height, width: d.width, height: d.height, opacity: 0.9
+    });
+    sealBottom = sealTop - d.height;
+  }
+  if (sig) {
+    const d = sig.scaleToFit(150, 50);
+    const sy = Math.max(sealBottom + 16, sealTop - 70);
+    page.drawImage(sig, { x: kit.MARGIN_X, y: sy, width: d.width, height: d.height });
+  }
+  const sigLineY = Math.min(y, sealBottom) - 10;
+  page.drawLine({
+    start: { x: kit.MARGIN_X, y: sigLineY },
+    end: { x: kit.MARGIN_X + 180, y: sigLineY },
+    thickness: 1,
+    color: ink
+  });
+  page.drawText(ascii(`Authorized Signatory: ${company?.branding?.authorizedSignatoryName || ''}`), {
+    x: kit.MARGIN_X, y: sigLineY - 14, size: 9, font, color: ink
+  });
   if (company?.branding?.authorizedSignatoryDesignation) {
-    page.drawText(ascii(company.branding.authorizedSignatoryDesignation), { x: 40, y: 116, size: 8, font, color: rgb(0.3, 0.3, 0.3) });
+    page.drawText(ascii(company.branding.authorizedSignatoryDesignation), {
+      x: kit.MARGIN_X, y: sigLineY - 28, size: 8, font, color: muted
+    });
   }
 
   const file = path.join(GENERATED_DOC_DIR, `doc-${crypto.randomUUID()}.pdf`);
@@ -550,8 +992,12 @@ export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENER
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const black = rgb(0.1, 0.1, 0.1);
 
+  const logoWithStamp = await loadImage(doc, company?.branding?.logoWithStampUrl);
   const stamp = await loadImage(doc, company?.branding?.stampUrl);
-  if (stamp) {
+  if (logoWithStamp) {
+    const d = logoWithStamp.scaleToFit(110, 110);
+    page.drawImage(logoWithStamp, { x: 410, y: 70, width: d.width, height: d.height, opacity: 0.95 });
+  } else if (stamp) {
     const d = stamp.scaleToFit(100, 100);
     page.drawImage(stamp, { x: 420, y: 80, width: d.width, height: d.height, opacity: 0.9 });
   }
@@ -560,7 +1006,7 @@ export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENER
     const d = sig.scaleToFit(150, 50);
     page.drawImage(sig, { x: 40, y: 110, width: d.width, height: d.height });
   }
-  if (company?.branding?.authorizedSignatoryName || sig || stamp) {
+  if (company?.branding?.authorizedSignatoryName || sig || stamp || logoWithStamp) {
     page.drawLine({ start: { x: 40, y: 105 }, end: { x: 220, y: 105 }, thickness: 1, color: black });
     page.drawText(ascii(`Authorized Signatory: ${company?.branding?.authorizedSignatoryName || ''}`), {
       x: 40, y: 90, size: 9, font, color: black
@@ -599,8 +1045,9 @@ export const generateLetterFromTemplate = async ({
     ...fields
   };
 
-  // Prefer type-specific template file; else company-wide letter outline/template.
-  const sourceFile = template?.fileUrl || company?.branding?.letterOutlineUrl || null;
+  // Type-specific fillable PDF only. Company letter outline is page chrome
+  // (applied by generateCompanyDocPdf), not an AcroForm source.
+  const sourceFile = template?.fileUrl || null;
 
   if (sourceFile && (await pdfHasAcroForms(sourceFile))) {
     const filled = await fillAcroFormPdf(sourceFile, merged);
@@ -788,25 +1235,21 @@ export const generateCFAgreementPdf = async ({ type, fields = {}, company, templ
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const black = rgb(0.12, 0.12, 0.12);
-  let page = doc.addPage([595, 842]);
-  let y = 800;
+  const kit = await createCompanyPageKit(doc, company, { font, bold });
+  const ink = rgb(0.12, 0.12, 0.12);
+  let { page, y } = kit.addDecoratedPage();
 
   const ensureSpace = (need = 40) => {
-    if (y < need) {
-      page = doc.addPage([595, 842]);
-      y = 800;
-    }
+    if (y < kit.contentBottomY + need) ({ page, y } = kit.addDecoratedPage());
   };
   const write = (s, opts = {}) => {
     const size = opts.size ?? 10;
     const f = opts.bold ? bold : font;
     ensureSpace(size + 20);
-    page.drawText(ascii(s), { x: opts.x ?? 48, y, size, font: f, color: black });
+    page.drawText(ascii(s), { x: opts.x ?? kit.MARGIN_X, y, size, font: f, color: ink });
     y -= opts.gap ?? (size + 6);
   };
 
-  write(companyName, { size: 14, bold: true, gap: 20 });
   write(title, { size: 12, bold: true, gap: 22 });
 
   for (const para of paragraphs) {
@@ -815,7 +1258,7 @@ export const generateCFAgreementPdf = async ({ type, fields = {}, company, templ
       write(para, { size: 10, bold: true, gap: 14 });
       continue;
     }
-    for (const ln of wrapText(para, 92)) write(ln, { size: 10, gap: 13 });
+    for (const ln of wrapText(para, 90)) write(ln, { size: 10, gap: 13 });
     y -= 4;
   }
 

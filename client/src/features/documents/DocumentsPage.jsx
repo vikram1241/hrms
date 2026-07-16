@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
@@ -21,12 +21,16 @@ const fileIdOf = (doc) => doc.fileUrl?.split('/').pop()?.replace('.pdf', '');
 export default function DocumentsPage() {
   const dispatch = useDispatch();
   const fileRef = useRef(null);
-  const { data: docs, loading, reload } = useAsync(() => listMyDocuments(), []);
+  const { data: docs, loading, error: listError, reload } = useAsync(() => listMyDocuments(), []);
   const [form, setForm] = useState({ documentType: 'PAN', documentName: '', documentNumber: '' });
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (listError) dispatch(notifyError(listError));
+  }, [listError, dispatch]);
 
   const upload = async (e) => {
     e.preventDefault();
@@ -41,21 +45,26 @@ export default function DocumentsPage() {
       setFile(null);
       reload();
     } catch (err) {
-      dispatch(notifyError(err.uiMessage));
+      dispatch(notifyError(err.uiMessage || 'Could not upload document.'));
     } finally {
       setUploading(false);
     }
   };
 
   const onDelete = async () => {
+    const fileId = fileIdOf(deleteTarget);
+    if (!fileId) {
+      dispatch(notifyError('Could not delete document: invalid document id.'));
+      return;
+    }
     setDeleting(true);
     try {
-      await deleteDocument(fileIdOf(deleteTarget));
+      await deleteDocument(fileId);
       dispatch(notifySuccess('Document deleted.'));
       setDeleteTarget(null);
       reload();
     } catch (err) {
-      dispatch(notifyError(err.uiMessage));
+      dispatch(notifyError(err.uiMessage || 'Could not delete document.'));
     } finally {
       setDeleting(false);
     }

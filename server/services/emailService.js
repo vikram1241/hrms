@@ -91,16 +91,50 @@ export const sendEmail = async ({ to, subject, body, html, meta = {}, attachment
   return deliver({ to, subject, body, html, meta, cfg, attachments });
 };
 
-export const sendOfferInvite = async ({ to, fullName, offerUrl }) => {
+/** Escape HTML, preserve newlines, and turn bare URLs into links. */
+const plainTextToHtml = (text = '') => {
+  const esc = String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const linked = esc.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    '<a href="$1">$1</a>'
+  );
+  return linked
+    .split(/\n{2,}/)
+    .map((block) => `<p>${block.replace(/\n/g, '<br/>')}</p>`)
+    .join('');
+};
+
+/**
+ * Email an offer invite. Prefer template-rendered subject/body; attach the PDF when provided.
+ */
+export const sendOfferInvite = async ({
+  to, fullName, offerUrl, subject, body, pdfPath, fileName
+} = {}) => {
   const cfg = await loadCompanyMail();
   const brand = cfg.brandName;
+  const subj = (subject && String(subject).trim())
+    || `Your employment offer from ${brand}`;
+  const text = (body && String(body).trim())
+    || `Hi ${fullName}, view and sign your offer here: ${offerUrl}`;
+  const attachments = pdfPath
+    ? [{
+      filename: fileName || 'offer-letter.pdf',
+      path: pdfPath,
+      contentType: 'application/pdf'
+    }]
+    : undefined;
   return deliver({
     to,
-    subject: `Your employment offer from ${brand}`,
-    body: `Hi ${fullName}, view and sign your offer here: ${offerUrl}`,
-    html: wrapHtml(`<p>Hi <strong>${fullName}</strong>,</p><p><a href="${offerUrl}">View &amp; Sign Offer</a></p>`, brand),
-    meta: { type: 'offer_invite', offerUrl },
-    cfg
+    subject: subj,
+    body: text,
+    html: wrapHtml(plainTextToHtml(text), brand),
+    meta: { type: 'offer_invite', offerUrl, hasPdf: Boolean(pdfPath) },
+    cfg,
+    attachments
   });
 };
 
@@ -119,10 +153,38 @@ export const sendPasswordSetup = async ({ to, fullName, setupUrl }) => {
 export const sendCredentials = async ({ to, fullName, employeeId, email, tempPassword, loginUrl }) => {
   const cfg = await loadCompanyMail();
   const brand = cfg.brandName;
+  const body = [
+    `Hi ${fullName},`,
+    '',
+    `Your ${brand} employee account is ready.`,
+    '',
+    `Employee ID: ${employeeId}`,
+    `Email: ${email}`,
+    `Temporary password: ${tempPassword}`,
+    '',
+    'You can sign in with either your Employee ID or email, plus this password.',
+    `Login: ${loginUrl}`,
+    '',
+    'Please change your password after your first login.'
+  ].join('\n');
+  const html = wrapHtml(
+    `<p>Hi <strong>${fullName}</strong>,</p>
+     <p>Your <strong>${brand}</strong> employee account is ready.</p>
+     <ul>
+       <li><strong>Employee ID:</strong> ${employeeId}</li>
+       <li><strong>Email:</strong> ${email}</li>
+       <li><strong>Temporary password:</strong> <code>${tempPassword}</code></li>
+     </ul>
+     <p>You can sign in with either your <strong>Employee ID</strong> or <strong>email</strong>, plus this password.</p>
+     <p><a href="${loginUrl}">${loginUrl}</a></p>
+     <p>Please change your password after your first login.</p>`,
+    brand
+  );
   return deliver({
     to,
     subject: `Your ${brand} employee account is ready`,
-    body: `Hi ${fullName}, Employee ID: ${employeeId}. Login: ${email} at ${loginUrl}`,
+    body,
+    html,
     meta: { type: 'credentials', employeeId },
     cfg
   });

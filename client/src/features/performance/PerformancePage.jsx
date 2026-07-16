@@ -2,19 +2,22 @@ import { useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { Plus, Gauge, Upload, Download } from 'lucide-react';
+import { Plus, Gauge, Upload, Download, Trash2 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import FormDialog from '../../components/ui/FormDialog.jsx';
+import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import DataGrid from '../../components/ui/DataGrid.jsx';
+import TablePager from '../../components/ui/TablePager.jsx';
 import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
+import JobRoleSelect from '../../components/feature/JobRoleSelect.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import {
-  listReviews, createReview,
-  createIncentive, listIncentives, incentiveAttachmentUrl,
-  createAppraisal, listAppraisals, appraisalAttachmentUrl,
+  listReviews, createReview, deleteReview,
+  createIncentive, listIncentives, incentiveAttachmentUrl, deleteIncentive,
+  createAppraisal, listAppraisals, appraisalAttachmentUrl, deleteAppraisal,
   createTrainingRecord
 } from '../../api/performance.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
@@ -23,11 +26,12 @@ const rupees = (p) => `INR ${((p || 0) / 100).toLocaleString('en-IN')}`;
 const today = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 
-// userId arrives populated ({ personalDetails, employeeDetails }) from the list endpoints.
 const employeeName = (u) => {
-  if (!u || typeof u === 'string') return u || '—';
+  if (!u) return '—';
+  if (typeof u === 'string') return u;
   const name = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
-  return name ? `${name}${u.employeeDetails?.employeeId ? ` (${u.employeeDetails.employeeId})` : ''}` : '—';
+  if (name) return `${name}${u.employeeDetails?.employeeId ? ` (${u.employeeDetails.employeeId})` : ''}`;
+  return u.email || '—';
 };
 
 const AttachmentLink = ({ fileId, url }) => fileId
@@ -41,11 +45,20 @@ const FileField = ({ file, onChange }) => (
   </label>
 );
 
+const emptyPag = { page: 1, limit: 10, total: 0, pages: 1 };
+
 export default function PerformancePage() {
   const dispatch = useDispatch();
-  const reviews = useAsync(() => listReviews(), []);
-  const incentives = useAsync(() => listIncentives(), []);
-  const appraisals = useAsync(() => listAppraisals(), []);
+  const [revPage, setRevPage] = useState(1);
+  const [revLimit, setRevLimit] = useState(10);
+  const [incPage, setIncPage] = useState(1);
+  const [incLimit, setIncLimit] = useState(10);
+  const [aprPage, setAprPage] = useState(1);
+  const [aprLimit, setAprLimit] = useState(10);
+
+  const reviews = useAsync(() => listReviews({ page: revPage, limit: revLimit }), [revPage, revLimit]);
+  const incentives = useAsync(() => listIncentives({ page: incPage, limit: incLimit }), [incPage, incLimit]);
+  const appraisals = useAsync(() => listAppraisals({ page: aprPage, limit: aprLimit }), [aprPage, aprLimit]);
 
   const [revOpen, setRevOpen] = useState(false);
   const [rev, setRev] = useState({ userId: '', period: '', overallRating: 3, comments: '', status: 'Published', kpis: [] });
@@ -54,6 +67,15 @@ export default function PerformancePage() {
   const [inc, setInc] = useState({ userId: '', period: '', amountRupees: '', reason: '', file: null });
   const [apr, setApr] = useState({ userId: '', effectiveDate: today(), newDesignation: '', newCTCRupees: '', remarks: '', file: null });
   const [trn, setTrn] = useState({ userId: '', title: '', provider: '', status: 'Assigned' });
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const reviewRows = reviews.data?.data || [];
+  const reviewPag = reviews.data?.pagination || emptyPag;
+  const incentiveRows = incentives.data?.data || [];
+  const incentivePag = incentives.data?.pagination || emptyPag;
+  const appraisalRows = appraisals.data?.data || [];
+  const appraisalPag = appraisals.data?.pagination || emptyPag;
 
   const saveReview = async (e) => {
     e.preventDefault();
@@ -72,6 +94,7 @@ export default function PerformancePage() {
       await createIncentive({ userId: inc.userId, period: inc.period, amount: Math.round(Number(inc.amountRupees) * 100), reason: inc.reason }, inc.file);
       dispatch(notifySuccess('Incentive recorded.'));
       setInc({ userId: '', period: '', amountRupees: '', reason: '', file: null });
+      setIncPage(1);
       incentives.reload();
     } catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
@@ -84,6 +107,7 @@ export default function PerformancePage() {
       }, apr.file);
       dispatch(notifySuccess('Promotion recorded.'));
       setApr({ userId: '', effectiveDate: today(), newDesignation: '', newCTCRupees: '', remarks: '', file: null });
+      setAprPage(1);
       appraisals.reload();
     } catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
@@ -93,22 +117,67 @@ export default function PerformancePage() {
     catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.kind === 'review') {
+        await deleteReview(deleteTarget._id);
+        reviews.reload();
+      } else if (deleteTarget.kind === 'incentive') {
+        await deleteIncentive(deleteTarget._id);
+        incentives.reload();
+      } else {
+        await deleteAppraisal(deleteTarget._id);
+        appraisals.reload();
+      }
+      dispatch(notifySuccess('Record deleted.'));
+      setDeleteTarget(null);
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Could not delete.'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const incentiveColumns = useMemo(() => [
-    { headerName: 'Employee', valueGetter: (p) => employeeName(p.data.userId), minWidth: 200, flex: 2 },
+    {
+      headerName: 'Employee', minWidth: 200, flex: 2, filter: false,
+      cellRenderer: (p) => <span>{employeeName(p.data?.userId)}</span>
+    },
     { headerName: 'Period', field: 'period', maxWidth: 130 },
     { headerName: 'Amount', valueGetter: (p) => p.data.amount, valueFormatter: (p) => rupees(p.value), maxWidth: 150 },
     { headerName: 'Reason', field: 'reason', flex: 2 },
     { headerName: 'Status', field: 'status', cellRenderer: (p) => <StatusBadge status={p.value} />, filter: false, maxWidth: 140 },
-    { headerName: 'Attachment', cellRenderer: (p) => <AttachmentLink fileId={p.data.attachmentFileId} url={incentiveAttachmentUrl(p.data._id)} />, filter: false, sortable: false, maxWidth: 130 }
+    { headerName: 'Attachment', cellRenderer: (p) => <AttachmentLink fileId={p.data.attachmentFileId} url={incentiveAttachmentUrl(p.data._id)} />, filter: false, sortable: false, maxWidth: 130 },
+    {
+      headerName: '', maxWidth: 70, filter: false, sortable: false,
+      cellRenderer: (p) => (
+        <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget({ kind: 'incentive', _id: p.data._id })} aria-label="Delete incentive">
+          <Trash2 size={14} />
+        </button>
+      )
+    }
   ], []);
 
   const appraisalColumns = useMemo(() => [
-    { headerName: 'Employee', valueGetter: (p) => employeeName(p.data.userId), minWidth: 200, flex: 2 },
+    {
+      headerName: 'Employee', minWidth: 200, flex: 2, filter: false,
+      cellRenderer: (p) => <span>{employeeName(p.data?.userId)}</span>
+    },
     { headerName: 'Effective date', valueGetter: (p) => p.data.effectiveDate, valueFormatter: (p) => fmtDate(p.value), maxWidth: 150 },
     { headerName: 'Previous designation', field: 'previousDesignation', flex: 1 },
     { headerName: 'New designation', field: 'newDesignation', flex: 1 },
     { headerName: 'New CTC', valueGetter: (p) => p.data.newCTC, valueFormatter: (p) => (p.value ? rupees(p.value) : '—'), maxWidth: 140 },
-    { headerName: 'Attachment', cellRenderer: (p) => <AttachmentLink fileId={p.data.attachmentFileId} url={appraisalAttachmentUrl(p.data._id)} />, filter: false, sortable: false, maxWidth: 130 }
+    { headerName: 'Attachment', cellRenderer: (p) => <AttachmentLink fileId={p.data.attachmentFileId} url={appraisalAttachmentUrl(p.data._id)} />, filter: false, sortable: false, maxWidth: 130 },
+    {
+      headerName: '', maxWidth: 70, filter: false, sortable: false,
+      cellRenderer: (p) => (
+        <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget({ kind: 'appraisal', _id: p.data._id })} aria-label="Delete promotion">
+          <Trash2 size={14} />
+        </button>
+      )
+    }
   ], []);
 
   return (
@@ -119,14 +188,30 @@ export default function PerformancePage() {
       <Card className="mb-4"><CardBody>
         <h3 className="mb-3 flex items-center gap-2 text-base font-semibold text-ink"><Gauge size={18} className="text-primary-600" /> Performance reviews</h3>
         <table className="w-full text-sm">
-          <thead><tr className="text-left text-muted"><th className="pb-2">Employee</th><th className="pb-2">Period</th><th className="pb-2">Rating</th><th className="pb-2">Status</th></tr></thead>
+          <thead><tr className="text-left text-muted"><th className="pb-2">Employee</th><th className="pb-2">Period</th><th className="pb-2">Rating</th><th className="pb-2">Status</th><th className="pb-2 text-right" /></tr></thead>
           <tbody>
-            {(reviews.data || []).map((r) => (
-              <tr key={r._id} className="border-t border-line"><td className="py-2">{r.userId}</td><td className="py-2">{r.period}</td><td className="py-2">{r.overallRating}/5</td><td className="py-2"><StatusBadge status={r.status === 'Published' ? 'active' : 'pending'} label={r.status} /></td></tr>
+            {reviewRows.map((r) => (
+              <tr key={r._id} className="border-t border-line">
+                <td className="py-2">{employeeName(r.userId)}</td>
+                <td className="py-2">{r.period}</td>
+                <td className="py-2">{r.overallRating}/5</td>
+                <td className="py-2"><StatusBadge status={r.status === 'Published' ? 'active' : 'pending'} label={r.status} /></td>
+                <td className="py-2 text-right">
+                  <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget({ kind: 'review', _id: r._id })} aria-label="Delete review">
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
             ))}
-            {!reviews.data?.length && <tr><td colSpan={4} className="py-6 text-center text-muted">No reviews yet.</td></tr>}
+            {!reviewRows.length && <tr><td colSpan={5} className="py-6 text-center text-muted">No reviews yet.</td></tr>}
           </tbody>
         </table>
+        <TablePager
+          page={reviewPag.page} pages={reviewPag.pages} total={reviewPag.total} limit={revLimit}
+          showingCount={reviewRows.length}
+          onPageChange={setRevPage}
+          onLimitChange={(n) => { setRevLimit(n); setRevPage(1); }}
+        />
       </CardBody></Card>
 
       <Card className="mb-4"><CardBody>
@@ -140,8 +225,22 @@ export default function PerformancePage() {
             <FileField file={inc.file} onChange={(f) => setInc({ ...inc, file: f })} />
           </div>
         </div>
-        <Button size="sm" onClick={saveInc} className="mb-4"><Plus size={13} /> Save incentive</Button>
-        <DataGrid rowData={incentives.data || []} columnDefs={incentiveColumns} loading={incentives.loading} height={360} />
+        <div className="mb-4 flex justify-end">
+          <Button size="sm" onClick={saveInc}><Plus size={13} /> Save incentive</Button>
+        </div>
+        <DataGrid
+          rowData={incentiveRows}
+          columnDefs={incentiveColumns}
+          loading={incentives.loading}
+          height={360}
+          pagination={false}
+        />
+        <TablePager
+          page={incentivePag.page} pages={incentivePag.pages} total={incentivePag.total} limit={incLimit}
+          showingCount={incentiveRows.length}
+          onPageChange={setIncPage}
+          onLimitChange={(n) => { setIncLimit(n); setIncPage(1); }}
+        />
       </CardBody></Card>
 
       <Card className="mb-4"><CardBody>
@@ -149,14 +248,26 @@ export default function PerformancePage() {
         <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-5 md:items-start">
           <EmployeeSelect value={apr.userId} onChange={(v) => setApr({ ...apr, userId: v })} />
           <TextField size="small" fullWidth type="date" label="Effective date" InputLabelProps={{ shrink: true }} value={apr.effectiveDate} onChange={(e) => setApr({ ...apr, effectiveDate: e.target.value })} />
-          <TextField size="small" fullWidth label="New designation" value={apr.newDesignation} onChange={(e) => setApr({ ...apr, newDesignation: e.target.value })} />
+          <JobRoleSelect value={apr.newDesignation} onChange={(v) => setApr({ ...apr, newDesignation: v })} label="New designation" />
           <TextField size="small" fullWidth label="New CTC (₹)" type="number" value={apr.newCTCRupees} onChange={(e) => setApr({ ...apr, newCTCRupees: e.target.value })} />
           <div className="flex items-center gap-2">
             <FileField file={apr.file} onChange={(f) => setApr({ ...apr, file: f })} />
           </div>
         </div>
         <Button size="sm" onClick={saveApr} className="mb-4"><Plus size={13} /> Save promotion</Button>
-        <DataGrid rowData={appraisals.data || []} columnDefs={appraisalColumns} loading={appraisals.loading} height={360} />
+        <DataGrid
+          rowData={appraisalRows}
+          columnDefs={appraisalColumns}
+          loading={appraisals.loading}
+          height={360}
+          pagination={false}
+        />
+        <TablePager
+          page={appraisalPag.page} pages={appraisalPag.pages} total={appraisalPag.total} limit={aprLimit}
+          showingCount={appraisalRows.length}
+          onPageChange={setAprPage}
+          onLimitChange={(n) => { setAprLimit(n); setAprPage(1); }}
+        />
       </CardBody></Card>
 
       <Card><CardBody>
@@ -194,6 +305,16 @@ export default function PerformancePage() {
           ))}
         </div>
       </FormDialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        loading={deleting}
+        title="Delete record?"
+        confirmLabel="Delete"
+        message="This record will be permanently removed."
+      />
     </div>
   );
 }

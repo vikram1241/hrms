@@ -78,12 +78,13 @@ const ASSET_KINDS = {
   letterhead: { url: 'letterheadUrl', fileName: 'letterheadFileName' },
   letterOutline: { url: 'letterOutlineUrl', fileName: 'letterOutlineFileName' },
   stamp: { url: 'stampUrl' },
+  logoWithStamp: { url: 'logoWithStampUrl' },
   signature: { url: 'signatureUrl' }
 };
 
 /**
  * POST /api/company/asset/:kind — upload a branding asset
- * (logo | letterhead | letterOutline | stamp | signature).
+ * (logo | letterhead | letterOutline | stamp | logoWithStamp | signature).
  */
 export const uploadCompanyBrandingAsset = asyncHandler(async (req, res) => {
   const meta = ASSET_KINDS[req.params.kind];

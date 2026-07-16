@@ -27,7 +27,7 @@ const STATUSES = ['Present', 'Absent', 'Half-Day', 'Leave', 'WeekOff', 'Holiday'
 export default function AttendanceAdminPage() {
   const dispatch = useDispatch();
   const holidays = useAsync(() => listHolidays({ year: new Date().getFullYear() }), []);
-  const { data: usersResp } = useAsync(() => listUsers({ limit: 200, role: 'employee', status: 'active' }), []);
+  const { data: usersResp } = useAsync(() => listUsers({ limit: 200, role: 'employee', status: 'active', employeesOnly: true }), []);
   const employees = usersResp?.data || [];
   const [att, setAtt] = useState({ userId: '', date: today(), status: 'Present' });
   const [bulk, setBulk] = useState({ userIds: [], date: today(), status: 'Present' });

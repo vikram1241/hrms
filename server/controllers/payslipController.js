@@ -4,12 +4,14 @@ import mongoose from 'mongoose';
 import SalarySlip from '../models/SalarySlip.js';
 import EmployeeSalaryAssignment from '../models/EmployeeSalaryAssignment.js';
 import Attendance from '../models/Attendance.js';
+import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import { generatePayslipPdf } from '../services/pdfService.js';
 import { sendPayslipNotice } from '../services/emailService.js';
 import { computeStatutoryDeductions } from '../utils/statutoryEngine.js';
+import { logActivity } from '../services/activityService.js';
 
 const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -70,8 +72,9 @@ const buildSlip = async (assignment, month, year, notify, { applyStatutory = fal
     paymentStatus: 'Paid'
   };
 
-  // Render PDF first so we can store its location on the document.
-  const pdfUrl = await generatePayslipPdf(slipData);
+  // Render PDF on the company page template (letter outline when configured).
+  const company = await Company.findById(user.companyId);
+  const pdfUrl = await generatePayslipPdf(slipData, company);
   slipData.pdfUrl = pdfUrl;
 
   const slip = await SalarySlip.findOneAndUpdate(
@@ -112,6 +115,15 @@ export const generatePayslips = asyncHandler(async (req, res) => {
     } catch (err) {
       results.failed.push({ employeeId: assignment.userId._id, error: err.message });
     }
+  }
+
+  if (results.generated.length) {
+    await logActivity({
+      actor: req.user,
+      action: 'payslip.generate',
+      entityType: 'SalarySlip',
+      message: `${results.generated.length} payslip(s) issued for ${MONTHS[month]} ${year}`
+    });
   }
 
   res.status(201).json({

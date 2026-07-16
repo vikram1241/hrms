@@ -36,9 +36,9 @@ export default function VerificationsPage() {
 
   useEffect(() => {
     setLoadingUsers(true);
-    listUsers({ search, limit: 15 })
+    listUsers({ search, limit: 15, employeesOnly: true })
       .then((r) => setUsers(r.data))
-      .catch((err) => dispatch(notifyError(err.uiMessage)))
+      .catch((err) => dispatch(notifyError(err.uiMessage || 'Could not load employees.')))
       .finally(() => setLoadingUsers(false));
   }, [search, dispatch]);
 
@@ -48,7 +48,7 @@ export default function VerificationsPage() {
     try {
       setDocs(await listUserDocuments(user._id));
     } catch (err) {
-      dispatch(notifyError(err.uiMessage));
+      dispatch(notifyError(err.uiMessage || 'Could not load documents.'));
     } finally {
       setLoadingDocs(false);
     }
@@ -56,6 +56,10 @@ export default function VerificationsPage() {
 
   const setStatus = async (doc, status) => {
     const fileId = fileIdOf(doc);
+    if (!fileId) {
+      dispatch(notifyError('Could not update document: invalid document id.'));
+      return;
+    }
     setBusyId(fileId);
     try {
       const updated = await verifyDocument(fileId, status);
@@ -66,7 +70,7 @@ export default function VerificationsPage() {
         : u)));
       dispatch(notifySuccess(`Document marked ${status}.`));
     } catch (err) {
-      dispatch(notifyError(err.uiMessage));
+      dispatch(notifyError(err.uiMessage || 'Could not update document status.'));
     } finally {
       setBusyId(null);
     }

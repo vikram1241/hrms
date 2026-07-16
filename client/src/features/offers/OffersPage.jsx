@@ -3,16 +3,20 @@ import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
-import Pagination from '@mui/material/Pagination';
 import Tooltip from '@mui/material/Tooltip';
-import { Search, Plus, FileSpreadsheet, Eye, Send, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, FileSpreadsheet, Eye, Send, CheckCircle2, RefreshCw, Trash2 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import DataGrid from '../../components/ui/DataGrid.jsx';
+import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
+import TablePager from '../../components/ui/TablePager.jsx';
 import CreateOfferDialog from './CreateOfferDialog.jsx';
 import BulkUploadDialog from './BulkUploadDialog.jsx';
-import { listOffers, updateOfferStatus, approveOffer, resendOffer, offerPdfUrl } from '../../api/offers.js';
+import {
+  listOffers, updateOfferStatus, approveOffer, resendOffer,
+  regenerateOffer, deleteOffer, offerPdfUrl
+} from '../../api/offers.js';
 import { OFFER_STATUSES } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
@@ -23,10 +27,13 @@ export default function OffersPage() {
   const [filters, setFilters] = useState({ search: '', status: '' });
   const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [resp, setResp] = useState({ data: [], pagination: { total: 0, pages: 1 } });
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [confirm, setConfirm] = useState(null); // { type: 'delete'|'regenerate', offer }
 
   useEffect(() => {
     const t = setTimeout(() => { setPage(1); setFilters((f) => ({ ...f, search: searchInput })); }, 350);
@@ -36,7 +43,7 @@ export default function OffersPage() {
   const fetchOffers = async () => {
     setLoading(true);
     try {
-      setResp(await listOffers({ ...filters, page, limit: 10 }));
+      setResp(await listOffers({ ...filters, page, limit }));
     } catch (err) {
       dispatch(notifyError(err.uiMessage));
     } finally {
@@ -45,7 +52,7 @@ export default function OffersPage() {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchOffers(); }, [filters, page]);
+  useEffect(() => { fetchOffers(); }, [filters, page, limit]);
 
   const changeStatus = async (offer, status) => {
     try {
@@ -58,21 +65,48 @@ export default function OffersPage() {
   };
 
   const resend = async (offer) => {
+    setBusyId(offer._id);
     try {
       await resendOffer(offer._id);
-      dispatch(notifySuccess('Offer reminder re-sent.'));
+      dispatch(notifySuccess('Offer reminder re-sent with PDF attached.'));
     } catch (err) {
       dispatch(notifyError(err.uiMessage));
+    } finally {
+      setBusyId(null);
     }
   };
 
   const approve = async (offer) => {
+    setBusyId(offer._id);
     try {
       const res = await approveOffer(offer._id);
       dispatch(notifySuccess(res.message || 'Offer approved — credentials emailed.'));
       fetchOffers();
     } catch (err) {
       dispatch(notifyError(err.uiMessage));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const runConfirm = async () => {
+    if (!confirm?.offer) return;
+    const { type, offer } = confirm;
+    setBusyId(offer._id);
+    try {
+      if (type === 'delete') {
+        await deleteOffer(offer._id);
+        dispatch(notifySuccess('Offer deleted.'));
+      } else if (type === 'regenerate') {
+        await regenerateOffer(offer._id);
+        dispatch(notifySuccess('Offer PDF regenerated. You can resend when ready.'));
+      }
+      setConfirm(null);
+      fetchOffers();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage));
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -96,17 +130,52 @@ export default function OffersPage() {
       )
     },
     {
-      headerName: 'Actions', filter: false, sortable: false, maxWidth: 160,
-      cellRenderer: (p) => (
-        <div className="flex h-full items-center gap-1">
-          <Tooltip title="View PDF"><a className="btn-ghost p-2 text-primary-600" href={offerPdfUrl(p.data._id)} target="_blank" rel="noreferrer"><Eye size={16} /></a></Tooltip>
-          {p.data.status === 'signed' && <Tooltip title="Approve & issue credentials"><button className="btn-ghost p-2 text-success" onClick={() => approve(p.data)}><CheckCircle2 size={16} /></button></Tooltip>}
-          {p.data.status !== 'accepted' && p.data.status !== 'signed' && <Tooltip title="Resend"><button className="btn-ghost p-2" onClick={() => resend(p.data)}><Send size={16} /></button></Tooltip>}
-        </div>
-      )
+      headerName: 'Actions', filter: false, sortable: false, minWidth: 200, maxWidth: 220,
+      cellRenderer: (p) => {
+        const o = p.data;
+        const busy = busyId === o._id;
+        const canMutate = o.status !== 'accepted';
+        return (
+          <div className="flex h-full items-center gap-0.5">
+            <Tooltip title="View PDF">
+              <a className="btn-ghost p-2 text-primary-600" href={offerPdfUrl(o._id)} target="_blank" rel="noreferrer">
+                <Eye size={16} />
+              </a>
+            </Tooltip>
+            {o.status === 'signed' && (
+              <Tooltip title="Approve & issue credentials">
+                <button type="button" className="btn-ghost p-2 text-success disabled:opacity-40" disabled={busy} onClick={() => approve(o)}>
+                  <CheckCircle2 size={16} />
+                </button>
+              </Tooltip>
+            )}
+            {canMutate && o.status !== 'signed' && (
+              <Tooltip title="Resend email">
+                <button type="button" className="btn-ghost p-2 disabled:opacity-40" disabled={busy} onClick={() => resend(o)}>
+                  <Send size={16} />
+                </button>
+              </Tooltip>
+            )}
+            {canMutate && (
+              <Tooltip title="Regenerate PDF">
+                <button type="button" className="btn-ghost p-2 disabled:opacity-40" disabled={busy} onClick={() => setConfirm({ type: 'regenerate', offer: o })}>
+                  <RefreshCw size={16} />
+                </button>
+              </Tooltip>
+            )}
+            {canMutate && (
+              <Tooltip title="Delete">
+                <button type="button" className="btn-ghost p-2 text-danger disabled:opacity-40" disabled={busy} onClick={() => setConfirm({ type: 'delete', offer: o })}>
+                  <Trash2 size={16} />
+                </button>
+              </Tooltip>
+            )}
+          </div>
+        );
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], []);
+  ], [busyId]);
 
   return (
     <div>
@@ -135,13 +204,33 @@ export default function OffersPage() {
 
       <DataGrid rowData={resp.data} columnDefs={columnDefs} loading={loading} pagination={false} height={560} />
 
-      <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
-        <p className="text-sm text-muted">Showing {resp.data.length} of {resp.pagination.total} offers</p>
-        <Pagination count={resp.pagination.pages || 1} page={page} onChange={(_, p) => setPage(p)} color="primary" shape="rounded" />
-      </div>
+      <TablePager
+        page={page}
+        pages={resp.pagination.pages || 1}
+        total={resp.pagination.total || 0}
+        limit={limit}
+        showingCount={resp.data.length}
+        onPageChange={setPage}
+        onLimitChange={(n) => { setLimit(n); setPage(1); }}
+      />
 
       <CreateOfferDialog open={createOpen} onClose={() => setCreateOpen(false)} onSaved={fetchOffers} />
       <BulkUploadDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onDone={fetchOffers} />
+
+      <ConfirmDialog
+        open={Boolean(confirm)}
+        onClose={() => setConfirm(null)}
+        onConfirm={runConfirm}
+        loading={Boolean(busyId)}
+        danger={confirm?.type === 'delete'}
+        title={confirm?.type === 'delete' ? 'Delete offer?' : 'Regenerate offer PDF?'}
+        confirmLabel={confirm?.type === 'delete' ? 'Delete' : 'Regenerate'}
+        message={
+          confirm?.type === 'delete'
+            ? `"${confirm.offer.fullName}" — the offer and its PDF will be permanently removed.`
+            : `"${confirm?.offer?.fullName}" — rebuild the PDF from the salary freeze and letter template. Any e-signature will be cleared; resend afterward if needed.`
+        }
+      />
     </div>
   );
 }

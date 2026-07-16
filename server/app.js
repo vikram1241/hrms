@@ -27,6 +27,7 @@ import exitRoutes from './routes/exitRoutes.js';
 import letterTemplateRoutes from './routes/letterTemplateRoutes.js';
 import cfTemplateRoutes from './routes/cfTemplateRoutes.js';
 import cfIssueRoutes from './routes/cfIssueRoutes.js';
+import jobRoleRoutes from './routes/jobRoleRoutes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import { tenantContextMiddleware } from './utils/tenantContext.js';
 import { corsOrigins } from './utils/clientOrigin.js';
@@ -81,6 +82,7 @@ app.use('/api/exits', exitRoutes);
 app.use('/api/letter-templates', letterTemplateRoutes);
 app.use('/api/cf-templates', cfTemplateRoutes);
 app.use('/api/cf-issues', cfIssueRoutes);
+app.use('/api/job-roles', jobRoleRoutes);
 // Attendance/leaves/holidays share one router with absolute subpaths.
 app.use('/api', attendanceRoutes);
 

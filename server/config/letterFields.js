@@ -53,4 +53,11 @@ export const validateLetterFields = (type, values = {}) => {
 
 /** Substitute {{placeholders}} in body paragraphs. */
 export const applyLetterPlaceholders = (paragraphs = [], fields = {}) =>
-  paragraphs.map((p) => String(p).replace(/\{\{(\w+)\}\}/g, (_, key) => String(fields[key] ?? '').trim() || `{{${key}}}`));
+  paragraphs.map((p) => applyLetterText(p, fields));
+
+/** Substitute {{placeholders}} in a single string (email subject/body, etc.). */
+export const applyLetterText = (text = '', fields = {}) =>
+  String(text ?? '').replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    const v = String(fields[key] ?? '').trim();
+    return v || `{{${key}}}`;
+  });

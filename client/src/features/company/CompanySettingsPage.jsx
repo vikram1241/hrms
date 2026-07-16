@@ -224,26 +224,32 @@ export default function CompanySettingsPage() {
             <FileText size={18} className="text-primary-600" /> Company letter assets
           </h3>
           <p className="mb-3 text-xs text-muted">
-            Letter header and outline/template are applied to all generated letters (offers, appointments, and sealed docs).
+            Letter header and page template apply to every generated PDF (offers, appointments, exits, payslips, C&amp;F, sealed docs).
           </p>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {assetUpload('letterhead', 'Company letter header', form.branding.letterheadUrl, Image, {
               accept: 'image/png,image/jpeg,application/pdf,.pdf',
-              hint: 'Header banner image or PDF used at the top of every letter.'
+              hint: 'Header banner used when no full page template is uploaded.'
             })}
             {assetUpload('letterOutline', 'Company letter template / outline', form.branding.letterOutlineUrl, FileText, {
               accept: 'application/pdf,.pdf,image/png,image/jpeg',
-              hint: 'Shared outline PDF used as the base for generated letters when available.'
+              hint: 'Blank letterhead page (PDF/image) used as the full-page background for all generated documents.'
             })}
           </div>
         </CardBody></Card>
 
         <Card className="lg:col-span-2"><CardBody>
           <h3 className="mb-3 text-base font-semibold text-ink">Seal &amp; branding assets</h3>
-          <p className="mb-3 text-xs text-muted">Logo, stamp and signature are printed onto issued PDFs. Click View to confirm uploads.</p>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <p className="mb-3 text-xs text-muted">
+            Logo, stamp and signature are printed onto issued PDFs. Prefer &quot;Company Logo with stamp&quot;
+            when you have a combined seal image. Click View to confirm uploads.
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             {assetUpload('logo', 'Company logo', form.branding.logoUrl, Building2)}
             {assetUpload('stamp', 'Company stamp', form.branding.stampUrl, Stamp)}
+            {assetUpload('logoWithStamp', 'Company Logo with stamp', form.branding.logoWithStampUrl, Stamp, {
+              hint: 'Combined logo + stamp image used on letter seals when available.'
+            })}
             {assetUpload('signature', 'Authorized signature', form.branding.signatureUrl, PenTool)}
           </div>
         </CardBody></Card>

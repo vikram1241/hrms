@@ -24,7 +24,7 @@ import EmployeeDocumentRecord from '../models/EmployeeDocumentRecord.js';
 import { TrainingSection, TrainingMedia } from '../models/trainingLibrary.js';
 import ExitRecord from '../models/ExitRecord.js';
 import CFTemplate from '../models/CFTemplate.js';
-import LetterTemplate from '../models/LetterTemplate.js';
+import LetterTemplate, { DEFAULT_LETTER_EMAIL } from '../models/LetterTemplate.js';
 import { computeBreakdown } from '../utils/salaryEngine.js';
 import { rupeesToPaisa } from '../utils/money.js';
 import { paisaToWords } from '../utils/numberToWords.js';
@@ -89,7 +89,7 @@ const TEMPLATES = [
   }
 ];
 
-const createPayslip = async (user, assignment, month, year) => {
+const createPayslip = async (user, assignment, month, year, company = null) => {
   const b = assignment.frozenMonthlyBreakdown;
   const data = {
     employeeId: user._id, month, year,
@@ -110,7 +110,7 @@ const createPayslip = async (user, assignment, month, year) => {
     },
     paymentStatus: 'Paid'
   };
-  data.pdfUrl = await generatePayslipPdf(data);
+  data.pdfUrl = await generatePayslipPdf(data, company);
   return SalarySlip.create(data);
 };
 
@@ -224,8 +224,8 @@ async function seedCompany(company) {
 
     const breakdown = computeBreakdown(spec.tpl, rupeesToPaisa(spec.ctc));
     const assignment = await EmployeeSalaryAssignment.create({ userId: user._id, templateId: spec.tpl._id, annualCTC: rupeesToPaisa(spec.ctc), frozenMonthlyBreakdown: breakdown });
-    await createPayslip(user, assignment, 5, 2026);
-    await createPayslip(user, assignment, 6, 2026);
+    await createPayslip(user, assignment, 5, 2026, company);
+    await createPayslip(user, assignment, 6, 2026, company);
 
     employees.push({ user, assignment, spec });
   }
@@ -235,7 +235,7 @@ async function seedCompany(company) {
   await seedLetterTemplates();
 
   // --- Offers: one sent (live link) + one accepted ---
-  const link = await seedOffers(engTpl);
+  const link = await seedOffers(engTpl, company);
 
   return {
     Users: await User.countDocuments(),
@@ -309,7 +309,15 @@ async function seedModules(company, employees) {
   // Uploadable document type (Form 16, read) + a pending record for Rahul.
   const form16 = await DocumentType.create({ name: 'Form 16', section: 'Tax', kind: 'read', termsText: 'Please confirm you have received your Form 16.' });
   await DocumentType.create({ name: 'Investment Declaration', section: 'Tax', kind: 'write', fields: [{ key: 'section80C', label: '80C investments (₹)', type: 'number', required: true }, { key: 'hraClaim', label: 'HRA claim (₹)', type: 'number' }] });
-  await EmployeeDocumentRecord.create({ userId: rahul._id, documentTypeId: form16._id, section: 'Tax', accessMode: 'read', sourceFileUrl: 'uploads/documents/seed-form16.pdf', status: 'pending' });
+  await EmployeeDocumentRecord.create({
+    userId: rahul._id,
+    documentTypeId: form16._id,
+    description: 'Form 16 (sample)',
+    section: 'Tax',
+    accessMode: 'read',
+    sourceFileUrl: 'uploads/documents/seed-form16.pdf',
+    status: 'pending'
+  });
 
   // Training library — sections (videos uploaded later by HR).
   await TrainingSection.create({ title: 'Onboarding', description: 'New-joiner orientation', order: 1 });
@@ -328,7 +336,7 @@ async function seedModules(company, employees) {
   }
 }
 
-async function seedOffers(engTpl) {
+async function seedOffers(engTpl, company = null) {
   let liveLink = null;
   const offerSpecs = [
     { email: 'vikram.singh@example.com', name: 'Vikram Singh', position: 'UI/UX Designer', department: 'Design', ctc: 1000000, accept: false },
@@ -342,17 +350,22 @@ async function seedOffers(engTpl) {
     });
     const breakdown = computeBreakdown(engTpl, rupeesToPaisa(o.ctc));
     const assignment = await EmployeeSalaryAssignment.create({ userId: cand._id, templateId: engTpl._id, annualCTC: rupeesToPaisa(o.ctc), frozenMonthlyBreakdown: breakdown });
-    const pdfFileUrl = await generateOfferLetterPdf({ fullName: o.name, position: o.position, department: o.department, offerDate: new Date(), joiningDate: new Date('2026-08-01'), breakdown, annualCTC: rupeesToPaisa(o.ctc) });
+    const { pdfFileUrl, acceptancePlacement } = await generateOfferLetterPdf({
+      fullName: o.name, position: o.position, department: o.department, offerDate: new Date(),
+      joiningDate: new Date('2026-08-01'), breakdown, annualCTC: rupeesToPaisa(o.ctc), company
+    });
     const { raw, hash } = generateToken();
     const offer = await OfferLetter.create({
       candidateEmail: o.email, fullName: o.name, position: o.position, department: o.department,
       offerDate: new Date(), joiningDate: new Date('2026-08-01'), salaryAssignmentId: assignment._id,
-      status: o.accept ? 'accepted' : 'sent', pdfFileUrl,
+      status: o.accept ? 'accepted' : 'sent', pdfFileUrl, acceptancePlacement,
       accessTokenHash: o.accept ? null : hash, accessTokenExpires: o.accept ? null : new Date(Date.now() + 7 * 864e5)
     });
     if (o.accept) {
       const signedAt = new Date();
-      offer.signedPdfFileUrl = await bakeSignatureOnOffer(pdfFileUrl, SIGNATURE_PNG, { name: o.name, signedAt });
+      offer.signedPdfFileUrl = await bakeSignatureOnOffer(pdfFileUrl, SIGNATURE_PNG, {
+        name: o.name, signedAt, acceptancePlacement
+      });
       offer.digitalSignature = { signatureBase64: SIGNATURE_PNG, signedAt, ipAddress: '127.0.0.1', verificationToken: generateToken().hash };
       offer.acceptedAt = signedAt;
       await offer.save();
@@ -434,7 +447,9 @@ async function seedLetterTemplates() {
       bodyParagraphs: [
         'We are pleased to extend this Offer of Employment for the position of {{designation}} in our organization, based at {{location}}.',
         'We were impressed with your profile, experience, and the interview discussions. We believe your skills and enthusiasm will be a valuable addition to our {{department}} team. As a {{designation}}, you will play a key role in promoting our products, building strong relationships with healthcare professionals, and contributing to the achievement of sales targets in your assigned territory. This position offers good growth opportunities within the organization for high performers.'
-      ]
+      ],
+      emailSubject: DEFAULT_LETTER_EMAIL.OfferLetter.subject,
+      emailBody: DEFAULT_LETTER_EMAIL.OfferLetter.body
     },
     {
       type: 'AppointmentLetter',
@@ -444,7 +459,9 @@ async function seedLetterTemplates() {
         'Dear {{employeeName}},',
         'This letter confirms your appointment as {{designation}} at {{companyName}}, effective {{joiningDate}}.',
         'Your employment is governed by the terms of your offer letter and company policies.'
-      ]
+      ],
+      emailSubject: DEFAULT_LETTER_EMAIL.AppointmentLetter.subject,
+      emailBody: DEFAULT_LETTER_EMAIL.AppointmentLetter.body
     },
     {
       type: 'ServiceLetter',
@@ -453,7 +470,9 @@ async function seedLetterTemplates() {
       bodyParagraphs: [
         'This is to certify that {{employeeName}} ({{employeeId}}) has been employed with {{companyName}} as {{designation}}.',
         'Date of joining: {{joiningDate}}.'
-      ]
+      ],
+      emailSubject: DEFAULT_LETTER_EMAIL.ServiceLetter.subject,
+      emailBody: DEFAULT_LETTER_EMAIL.ServiceLetter.body
     },
     {
       type: 'FNFLetter',
@@ -462,7 +481,9 @@ async function seedLetterTemplates() {
       bodyParagraphs: [
         'Dear {{employeeName}},',
         'Your full and final settlement with {{companyName}} is enclosed. Last working day: {{lastWorkingDay}}.'
-      ]
+      ],
+      emailSubject: DEFAULT_LETTER_EMAIL.FNFLetter.subject,
+      emailBody: DEFAULT_LETTER_EMAIL.FNFLetter.body
     }
   ];
 

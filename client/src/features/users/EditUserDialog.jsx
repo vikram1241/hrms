@@ -5,6 +5,7 @@ import MenuItem from '@mui/material/MenuItem';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import FormDialog from '../../components/ui/FormDialog.jsx';
+import JobRoleSelect from '../../components/feature/JobRoleSelect.jsx';
 import { updateUser } from '../../api/users.js';
 import { DEPARTMENTS, ROLES, fullName } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../../features/ui/toastSlice.js';
@@ -64,7 +65,12 @@ export default function EditUserDialog({ open, user, onClose, onSaved }) {
           <MenuItem value="">—</MenuItem>
           {DEPARTMENTS.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
         </TextField>
-        <TextField label="Designation" value={form.designation || ''} onChange={set('designation')} fullWidth className="sm:col-span-2" />
+        <JobRoleSelect
+          value={form.designation || ''}
+          onChange={(v) => setForm({ ...form, designation: v })}
+          className="sm:col-span-2"
+          size="medium"
+        />
       </div>
       <FormControlLabel
         sx={{ mt: 1 }}

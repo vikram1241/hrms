@@ -25,25 +25,25 @@ export default function MyDocumentsPage() {
 
   const agree = async (doc) => {
     try { await acknowledgeDocument(doc._id, { agree: true }); dispatch(notifySuccess('Acknowledged.')); gen.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    catch (err) { dispatch(notifyError(err.uiMessage || 'Could not acknowledge document.')); }
   };
   const sign = async () => {
     if (padRef.current?.isEmpty()) return dispatch(notifyError('Please draw your signature.'));
     setBusy(true);
     try { await acknowledgeDocument(signDoc._id, { signatureBase64: padRef.current.toDataURL() }); dispatch(notifySuccess('Signed.')); setSignDoc(null); gen.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    catch (err) { dispatch(notifyError(err.uiMessage || 'Could not sign document.')); }
     finally { setBusy(false); }
   };
   const accept = async (r) => {
     try { await acceptRecord(r._id); dispatch(notifySuccess('Confirmed.')); rec.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    catch (err) { dispatch(notifyError(err.uiMessage || 'Could not confirm document.')); }
   };
   const openFill = (r) => { setFillRec(r); setValues({}); };
   const submitFill = async (e) => {
     e.preventDefault();
     setBusy(true);
     try { await fillRecord(fillRec._id, values); dispatch(notifySuccess('Submitted.')); setFillRec(null); rec.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    catch (err) { dispatch(notifyError(err.uiMessage || 'Could not submit document.')); }
     finally { setBusy(false); }
   };
 
@@ -83,7 +83,7 @@ export default function MyDocumentsPage() {
             {(rec.data || []).map((r) => (
               <tr key={r._id} className="border-t border-line">
                 <td className="py-2 text-muted">{r.section}</td>
-                <td className="py-2 font-medium text-ink">{r.documentTypeId?.name || '—'}</td>
+                <td className="py-2 font-medium text-ink">{r.description || r.documentTypeId?.name || '—'}</td>
                 <td className="py-2 capitalize">{r.accessMode}</td>
                 <td className="py-2"><StatusBadge status={r.status} /></td>
                 <td className="py-2">
@@ -112,7 +112,7 @@ export default function MyDocumentsPage() {
       </FormDialog>
 
       {/* Write-mode fill dialog */}
-      <FormDialog open={Boolean(fillRec)} onClose={() => setFillRec(null)} title={`Fill — ${fillRec?.documentTypeId?.name || ''}`}
+      <FormDialog open={Boolean(fillRec)} onClose={() => setFillRec(null)} title={`Fill — ${fillRec?.description || fillRec?.documentTypeId?.name || ''}`}
         onSubmit={submitFill} loading={busy} submitLabel="Submit">
         <div className="space-y-3 py-1">
           <p className="flex items-center gap-1.5 text-xs text-muted"><CheckCircle2 size={13} /> Enter values for the form fields; they will be written into the PDF.</p>

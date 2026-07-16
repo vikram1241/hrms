@@ -1,5 +1,10 @@
 import { Router } from 'express';
-import { getOfferByToken, signOffer, setupPassword } from '../controllers/candidateController.js';
+import {
+  getOfferByToken,
+  downloadOfferPdfByToken,
+  signOffer,
+  setupPassword
+} from '../controllers/candidateController.js';
 import { signOfferRules, setupPasswordRules } from '../validators/candidateValidators.js';
 import validate from '../middleware/validate.js';
 
@@ -8,6 +13,7 @@ import validate from '../middleware/validate.js';
 const router = Router();
 
 router.get('/offer/:token', getOfferByToken);
+router.get('/offer/:token/pdf', downloadOfferPdfByToken);
 router.post('/offer/:token/sign', signOfferRules, validate, signOffer);
 router.post('/setup-password', setupPasswordRules, validate, setupPassword);
 

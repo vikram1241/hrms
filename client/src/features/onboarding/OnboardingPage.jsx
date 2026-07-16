@@ -9,30 +9,90 @@ import MenuItem from '@mui/material/MenuItem';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import IconButton from '@mui/material/IconButton';
-import { Plus, Trash2, ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, ArrowRight, CheckCircle2, Upload, FileText } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
-import { getOnboardingStatus, savePersonal, saveFamily, saveContact, saveBank } from '../../api/onboarding.js';
+import { getOnboardingStatus, savePersonal, saveFamily, saveContact, saveExperience, saveBank } from '../../api/onboarding.js';
+import { uploadDocument } from '../../api/documents.js';
+import { rupeesToPaisa } from '../../lib/money.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
-const STEPS = ['Personal', 'Family', 'Contact', 'Bank'];
+const STEPS = ['Personal', 'Family', 'Contact', 'Previous Employer', 'Bank'];
 const GENDERS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
 const RELATIONS = ['Father', 'Mother', 'Spouse', 'Sibling', 'Child', 'Other'];
-const stageToStep = { personal: 0, family: 1, contact: 2, bank: 3, completed: 3 };
+const stageToStep = { personal: 0, family: 1, contact: 2, experience: 3, bank: 4, completed: 4 };
+
+const emptyEmployer = () => ({
+  employerName: '',
+  designation: '',
+  fromDate: '',
+  toDate: '',
+  lastDrawnCTCRupees: '',
+  reasonForLeaving: '',
+  offerLetterFileUrl: '',
+  offerLetterName: '',
+  payslipFileUrls: ['', '', ''],
+  payslipNames: ['', '', ''],
+  serviceOrFnfFileUrl: '',
+  serviceOrFnfName: ''
+});
+
+function FileSlot({ label, fileName, uploading, onPick }) {
+  return (
+    <div className="rounded-md border border-line bg-surface-muted/40 px-3 py-2">
+      <p className="mb-1 text-xs font-medium text-muted">{label}</p>
+      <div className="flex items-center gap-2">
+        <label className="btn-secondary btn-sm cursor-pointer">
+          <Upload size={14} />
+          {uploading ? 'Uploading…' : 'Choose PDF'}
+          <input
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            disabled={uploading}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) onPick(f);
+            }}
+          />
+        </label>
+        {fileName ? (
+          <span className="inline-flex items-center gap-1 truncate text-xs text-ink">
+            <FileText size={14} className="shrink-0 text-primary-600" />
+            {fileName}
+          </span>
+        ) : (
+          <span className="text-xs text-muted">No file selected</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function OnboardingPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [active, setActive] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [uploadingKey, setUploadingKey] = useState(null);
 
   const [personal, setPersonal] = useState({ firstName: '', lastName: '', dateOfBirth: '', gender: '', bloodGroup: '', maritalStatus: 'Single' });
   const [family, setFamily] = useState([{ name: '', relationship: 'Father', dependent: false, contactNumber: '' }]);
   const [contact, setContact] = useState({ personalMobile: '', emergencyContactName: '', emergencyContactRelation: '', emergencyContactPhone: '', presentAddress: { street: '', city: '', state: '', zipCode: '', country: 'India' }, sameAsPresent: true, permanentAddress: { street: '', city: '', state: '', zipCode: '', country: 'India' } });
+  const [notApplicable, setNotApplicable] = useState(false);
+  const [employers, setEmployers] = useState([emptyEmployer()]);
   const [bank, setBank] = useState({ accountHolderName: '', accountNumber: '', bankName: '', ifscCode: '', panNumber: '', uanNumber: '' });
 
-  useEffect(() => { getOnboardingStatus().then((s) => setActive(stageToStep[s.stage] ?? 0)).catch(() => {}); }, []);
+  useEffect(() => {
+    getOnboardingStatus()
+      .then((s) => {
+        setActive(stageToStep[s.stage] ?? 0);
+        setNotApplicable(Boolean(s.previousEmployerNotApplicable));
+      })
+      .catch(() => {});
+  }, []);
 
   const next = () => setActive((a) => Math.min(a + 1, STEPS.length - 1));
   const back = () => setActive((a) => Math.max(a - 1, 0));
@@ -45,6 +105,91 @@ export default function OnboardingPage() {
   };
 
   const addr = (which) => (k) => (e) => setContact({ ...contact, [which]: { ...contact[which], [k]: e.target.value } });
+
+  const updateEmployer = (i, patch) => {
+    setEmployers((list) => list.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  };
+
+  const uploadEmployerDoc = async (i, kind, file, payslipIndex = null) => {
+    const key = payslipIndex != null ? `${i}-payslip-${payslipIndex}` : `${i}-${kind}`;
+    setUploadingKey(key);
+    try {
+      const employerLabel = employers[i]?.employerName || 'Previous employer';
+      let documentType = 'Other';
+      let documentName = file.name;
+      let documentNumber = 'NA';
+      if (kind === 'offer') {
+        documentType = 'PreviousOfferLetter';
+        documentName = `Offer letter - ${employerLabel}`;
+        documentNumber = `PREV-OFFER-${i + 1}`;
+      } else if (kind === 'payslip') {
+        documentType = 'Payslip';
+        documentName = `Payslip ${payslipIndex + 1} - ${employerLabel}`;
+        documentNumber = `PREV-PAYSLIP-${i + 1}-${payslipIndex + 1}`;
+      } else if (kind === 'service') {
+        documentType = 'ServiceOrFnfLetter';
+        documentName = `Service/FNF - ${employerLabel}`;
+        documentNumber = `PREV-SERVICE-${i + 1}`;
+      }
+      const res = await uploadDocument({ file, documentType, documentName, documentNumber });
+      const fileUrl = res.document?.fileUrl;
+      if (!fileUrl) throw new Error('Upload failed');
+      setEmployers((list) => list.map((row, idx) => {
+        if (idx !== i) return row;
+        if (kind === 'offer') return { ...row, offerLetterFileUrl: fileUrl, offerLetterName: file.name };
+        if (kind === 'service') return { ...row, serviceOrFnfFileUrl: fileUrl, serviceOrFnfName: file.name };
+        if (kind === 'payslip') {
+          const urls = [...row.payslipFileUrls];
+          const names = [...row.payslipNames];
+          urls[payslipIndex] = fileUrl;
+          names[payslipIndex] = file.name;
+          return { ...row, payslipFileUrls: urls, payslipNames: names };
+        }
+        return row;
+      }));
+      dispatch(notifySuccess('Document uploaded.'));
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Upload failed'));
+    } finally {
+      setUploadingKey(null);
+    }
+  };
+
+  const submitExperience = () => {
+    if (notApplicable) {
+      return run(() => saveExperience({ notApplicable: true, experienceHistory: [] }), next);
+    }
+    for (const row of employers) {
+      if (!row.employerName.trim()) {
+        dispatch(notifyError('Employer name is required'));
+        return;
+      }
+      if (!row.offerLetterFileUrl) {
+        dispatch(notifyError('Upload previous employer offer letter'));
+        return;
+      }
+      if (row.payslipFileUrls.filter(Boolean).length < 3) {
+        dispatch(notifyError('Upload 3 previous employer payslips'));
+        return;
+      }
+      if (!row.serviceOrFnfFileUrl) {
+        dispatch(notifyError('Upload service letter or FNF document'));
+        return;
+      }
+    }
+    const experienceHistory = employers.map((row) => ({
+      employerName: row.employerName.trim(),
+      designation: row.designation.trim() || undefined,
+      fromDate: row.fromDate || undefined,
+      toDate: row.toDate || undefined,
+      lastDrawnCTC: row.lastDrawnCTCRupees !== '' ? rupeesToPaisa(row.lastDrawnCTCRupees) : undefined,
+      reasonForLeaving: row.reasonForLeaving.trim() || undefined,
+      offerLetterFileUrl: row.offerLetterFileUrl,
+      payslipFileUrls: row.payslipFileUrls.filter(Boolean).slice(0, 3),
+      serviceOrFnfFileUrl: row.serviceOrFnfFileUrl
+    }));
+    return run(() => saveExperience({ notApplicable: false, experienceHistory }), next);
+  };
 
   return (
     <div>
@@ -118,8 +263,77 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 4: Bank */}
+          {/* Step 4: Previous Employer */}
           {active === 3 && (
+            <div className="space-y-4">
+              <FormControlLabel
+                control={(
+                  <Checkbox
+                    checked={notApplicable}
+                    onChange={(e) => setNotApplicable(e.target.checked)}
+                  />
+                )}
+                label="Not applicable — I have no previous employer (fresher)"
+              />
+
+              {!notApplicable && (
+                <div className="space-y-6">
+                  <p className="text-sm text-muted">
+                    Provide previous employer details and upload offer letter, last 3 payslips, and service letter or FNF.
+                  </p>
+                  {employers.map((row, i) => (
+                    <div key={i} className="space-y-3 rounded-lg border border-line p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-ink">Employer {i + 1}</p>
+                        {employers.length > 1 && (
+                          <IconButton size="small" color="error" onClick={() => setEmployers(employers.filter((_, idx) => idx !== i))}>
+                            <Trash2 size={16} />
+                          </IconButton>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <TextField label="Employer Name" value={row.employerName} onChange={(e) => updateEmployer(i, { employerName: e.target.value })} fullWidth required />
+                        <TextField label="Designation" value={row.designation} onChange={(e) => updateEmployer(i, { designation: e.target.value })} fullWidth />
+                        <TextField label="From" type="date" value={row.fromDate} onChange={(e) => updateEmployer(i, { fromDate: e.target.value })} fullWidth InputLabelProps={{ shrink: true }} />
+                        <TextField label="To" type="date" value={row.toDate} onChange={(e) => updateEmployer(i, { toDate: e.target.value })} fullWidth InputLabelProps={{ shrink: true }} />
+                        <TextField label="Last Drawn CTC (₹ / year)" type="number" value={row.lastDrawnCTCRupees} onChange={(e) => updateEmployer(i, { lastDrawnCTCRupees: e.target.value })} fullWidth />
+                        <TextField label="Reason for Leaving" value={row.reasonForLeaving} onChange={(e) => updateEmployer(i, { reasonForLeaving: e.target.value })} fullWidth />
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <FileSlot
+                          label="Previous employer offer letter (PDF)"
+                          fileName={row.offerLetterName}
+                          uploading={uploadingKey === `${i}-offer`}
+                          onPick={(f) => uploadEmployerDoc(i, 'offer', f)}
+                        />
+                        <FileSlot
+                          label="Service letter or FNF (PDF)"
+                          fileName={row.serviceOrFnfName}
+                          uploading={uploadingKey === `${i}-service`}
+                          onPick={(f) => uploadEmployerDoc(i, 'service', f)}
+                        />
+                        {[0, 1, 2].map((p) => (
+                          <FileSlot
+                            key={p}
+                            label={`Payslip ${p + 1} of 3 (PDF)`}
+                            fileName={row.payslipNames[p]}
+                            uploading={uploadingKey === `${i}-payslip-${p}`}
+                            onPick={(f) => uploadEmployerDoc(i, 'payslip', f, p)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => setEmployers([...employers, emptyEmployer()])}>
+                    <Plus size={14} /> Add Another Employer
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 5: Bank */}
+          {active === 4 && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <TextField label="Account Holder Name" value={bank.accountHolderName} onChange={(e) => setBank({ ...bank, accountHolderName: e.target.value })} fullWidth />
               <TextField label="Account Number" value={bank.accountNumber} onChange={(e) => setBank({ ...bank, accountNumber: e.target.value })} fullWidth />
@@ -136,7 +350,8 @@ export default function OnboardingPage() {
             {active === 0 && <Button loading={saving} onClick={() => run(() => savePersonal(personal), next)}>Save & Proceed <ArrowRight size={16} /></Button>}
             {active === 1 && <Button loading={saving} onClick={() => run(() => saveFamily(family), next)}>Save & Proceed <ArrowRight size={16} /></Button>}
             {active === 2 && <Button loading={saving} onClick={() => run(() => saveContact(contact), next)}>Save & Proceed <ArrowRight size={16} /></Button>}
-            {active === 3 && <Button loading={saving} onClick={() => run(() => saveBank(bank), () => { navigate('/me'); })}><CheckCircle2 size={16} /> Finish Onboarding</Button>}
+            {active === 3 && <Button loading={saving || Boolean(uploadingKey)} onClick={submitExperience}>Save & Proceed <ArrowRight size={16} /></Button>}
+            {active === 4 && <Button loading={saving} onClick={() => run(() => saveBank(bank), () => { navigate('/me'); })}><CheckCircle2 size={16} /> Finish Onboarding</Button>}
           </div>
         </CardBody>
       </Card>

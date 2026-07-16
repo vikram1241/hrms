@@ -59,8 +59,10 @@ export const educationRules = [
 ];
 
 export const experienceRules = [
+  body('notApplicable').optional().isBoolean().toBoolean(),
   body('experienceHistory').optional().isArray().withMessage('experienceHistory must be an array'),
-  body('experienceHistory.*.employerName').isString().trim().notEmpty().withMessage('Employer name is required'),
+  // Document / employer field rules are enforced in the controller so the
+  // notApplicable (fresher) path can skip them cleanly.
   body('references').optional().isArray().withMessage('references must be an array'),
   body('references.*.name').optional().isString().trim().notEmpty().withMessage('Reference name is required')
 ];

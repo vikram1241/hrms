@@ -18,9 +18,19 @@ import { sendOfferInvite } from '../services/emailService.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 import Company from '../models/Company.js';
 import { resolveDefaultLetterTemplate } from './letterTemplateController.js';
+import { applyLetterText } from '../config/letterFields.js';
+import { DEFAULT_LETTER_EMAIL } from '../models/LetterTemplate.js';
+import { logActivity } from '../services/activityService.js';
 
 const ACCESS_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const exposeToken = () => process.env.NODE_ENV !== 'production';
+
+const fmtDate = (d) => {
+  if (!d) return '';
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return String(d);
+  return x.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
 
 const resolveTemplate = async ({ templateId, templateName }) => {
   let tpl = null;
@@ -30,13 +40,77 @@ const resolveTemplate = async ({ templateId, templateName }) => {
   return tpl;
 };
 
+const buildOfferEmailFields = ({
+  fullName, position, department, joiningDate, offerDate, location, company, annualCTCPaisa, offerUrl
+}) => ({
+  employeeName: fullName || '',
+  designation: position || '',
+  department: department || '',
+  joiningDate: fmtDate(joiningDate),
+  offerDate: fmtDate(offerDate),
+  date: fmtDate(offerDate || new Date()),
+  location: location || '',
+  companyName: company?.name || 'Company',
+  ctc: annualCTCPaisa != null ? formatINR(annualCTCPaisa) : '',
+  offerUrl: offerUrl || '',
+  employeeId: '',
+  lastWorkingDay: ''
+});
+
+/** Render email subject/body from the Offer letter template (or defaults). */
+const renderOfferEmail = (letterTpl, fields) => {
+  const defaults = DEFAULT_LETTER_EMAIL.OfferLetter;
+  const subjectTpl = (letterTpl?.emailSubject && String(letterTpl.emailSubject).trim())
+    || defaults.subject;
+  const bodyTpl = (letterTpl?.emailBody && String(letterTpl.emailBody).trim())
+    || defaults.body;
+  return {
+    subject: applyLetterText(subjectTpl, fields),
+    body: applyLetterText(bodyTpl, fields)
+  };
+};
+
+const offerPdfAbs = (rel) => path.resolve(process.cwd(), rel);
+
+const deliverOfferEmail = async ({ offer, fullName, offerUrl, subject, body, annualCTCPaisa, company, letterTpl }) => {
+  let email = { subject, body };
+  if (!email.subject || !email.body) {
+    const fields = buildOfferEmailFields({
+      fullName: fullName || offer.fullName,
+      position: offer.position,
+      department: offer.department,
+      joiningDate: offer.joiningDate,
+      offerDate: offer.offerDate,
+      location: offer.location,
+      company,
+      annualCTCPaisa,
+      offerUrl
+    });
+    const rendered = renderOfferEmail(letterTpl, fields);
+    email = {
+      subject: email.subject || rendered.subject,
+      body: email.body || rendered.body
+    };
+  }
+  const safeName = String(fullName || offer.fullName || 'candidate').replace(/[^\w.-]+/g, '-');
+  return sendOfferInvite({
+    to: offer.candidateEmail,
+    fullName: fullName || offer.fullName,
+    offerUrl,
+    subject: email.subject,
+    body: email.body,
+    pdfPath: offerPdfAbs(offer.pdfFileUrl),
+    fileName: `Offer-Letter-${safeName}.pdf`
+  });
+};
+
 /**
  * Core offer-staging logic shared by single + bulk creation.
- * Creates/locates the candidate user, freezes their salary assignment,
- * renders the offer PDF, mints a magic-link token, and emails the candidate.
- * @returns {{ offer, accessToken }}
+ * Creates/locates the candidate user, freezes salary, renders PDF, mints magic link.
+ * Emails only when `sendEmail` is true (bulk / default API). Preview flow uses sendEmail:false.
+ * @returns {{ offer, accessToken, offerUrl, emailPreview }}
  */
-const createOfferCore = async (payload) => {
+const createOfferCore = async (payload, { sendEmail = true } = {}) => {
   const { candidateEmail, fullName, position, department, joiningDate, offerDate } = payload;
   const annualCTC = Number(payload.annualCTC);
   if (!Number.isFinite(annualCTC) || annualCTC <= 0) throw new ApiError(400, 'annualCTC must be a positive number');
@@ -60,7 +134,7 @@ const createOfferCore = async (payload) => {
   // Always generate the Mirus-style offer PDF so the salary table comes from the
   // salary structure template selected at create time (frozen breakdown).
   // Letter template bodyParagraphs optionally override the common letter body.
-  const pdfFileUrl = await generateOfferLetterPdf({
+  const { pdfFileUrl, acceptancePlacement } = await generateOfferLetterPdf({
     fullName,
     position,
     department,
@@ -78,38 +152,140 @@ const createOfferCore = async (payload) => {
   });
 
   const { raw, hash } = generateToken();
+  const offerUrl = `${clientOrigin()}/offer/${raw}`;
+  const emailPreview = renderOfferEmail(letterTpl, buildOfferEmailFields({
+    fullName,
+    position,
+    department,
+    joiningDate,
+    offerDate: offerDt,
+    location: payload.location || '',
+    company,
+    annualCTCPaisa,
+    offerUrl
+  }));
+
   const offer = await OfferLetter.create({
     candidateEmail: String(candidateEmail).toLowerCase().trim(),
     fullName, position, department,
     phone: payload.phone || '',
     city: payload.city || '',
     location: payload.location || '',
-    offerDate: offerDate || new Date(),
+    offerDate: offerDt,
     joiningDate,
     salaryAssignmentId: assignment._id,
-    status: 'sent',
+    status: sendEmail ? 'sent' : 'pending',
     pdfFileUrl,
+    acceptancePlacement,
     accessTokenHash: hash,
     accessTokenExpires: new Date(Date.now() + ACCESS_TOKEN_TTL_MS)
   });
 
-  const offerUrl = `${clientOrigin()}/offer/${raw}`;
-  await sendOfferInvite({ to: offer.candidateEmail, fullName, offerUrl });
+  if (sendEmail) {
+    await deliverOfferEmail({
+      offer,
+      fullName,
+      offerUrl,
+      subject: emailPreview.subject,
+      body: emailPreview.body
+    });
+  }
 
-  return { offer, accessToken: raw, offerUrl };
+  return { offer, accessToken: raw, offerUrl, emailPreview };
 };
 
 /**
  * POST /api/offers
  * US 3.1 — stage a single electronic offer.
- * Body: { candidateEmail, fullName, position, department, joiningDate, templateId, annualCTC, offerDate? }
+ * Body: { …, sendEmail?: boolean } — when false, returns emailPreview for review before send.
  */
 export const createOffer = asyncHandler(async (req, res) => {
-  const { offer, accessToken, offerUrl } = await createOfferCore(req.body);
+  const sendEmail = !(req.body.sendEmail === false || req.body.sendEmail === 'false');
+  const { offer, accessToken, offerUrl, emailPreview } = await createOfferCore(req.body, { sendEmail });
+  await logActivity({
+    actor: req.user,
+    action: sendEmail ? 'offer.send' : 'offer.create',
+    entityType: 'OfferLetter',
+    entityId: offer._id,
+    message: sendEmail
+      ? `Offer sent to ${offer.fullName} (${offer.candidateEmail})`
+      : `Offer drafted for ${offer.fullName}`
+  });
   res.status(201).json({
     success: true,
-    message: 'Offer staged and sent',
+    message: sendEmail ? 'Offer staged and sent' : 'Offer generated — review email before sending',
     offer,
+    emailPreview,
+    // Always return offerUrl for the preview step (HR sees the signing link in the draft).
+    offerUrl,
+    ...(exposeToken() || !sendEmail ? { accessToken } : {})
+  });
+});
+
+/**
+ * POST /api/offers/:id/send — send offer email after preview (or re-send).
+ * Body: { subject?, body?, remint?: boolean }
+ * - First send (status pending): uses subject/body from the preview dialog (signing link already filled).
+ * - Re-send: remints magic link and re-renders from the letter template unless subject/body override both provided with remint:false.
+ */
+export const sendOfferEmail = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid offer id');
+  const offer = await OfferLetter.findById(req.params.id);
+  if (!offer) throw new ApiError(404, 'Offer not found');
+  if (offer.status === 'accepted') throw new ApiError(400, 'Offer already accepted');
+
+  const isFirstSend = offer.status === 'pending';
+  const company = await Company.findById(offer.companyId);
+  const letterTpl = await resolveDefaultLetterTemplate('OfferLetter');
+  const assignment = await EmployeeSalaryAssignment.findById(offer.salaryAssignmentId);
+
+  let accessToken = null;
+  let offerUrl = '';
+  let subject = req.body.subject != null ? String(req.body.subject) : '';
+  let body = req.body.body != null ? String(req.body.body) : '';
+
+  // First send after preview: keep the existing magic-link (already in subject/body).
+  // Re-send / missing copy: remint and render from the letter template.
+  if (!(isFirstSend && subject && body)) {
+    const { raw, hash } = generateToken();
+    offer.accessTokenHash = hash;
+    offer.accessTokenExpires = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);
+    accessToken = raw;
+    offerUrl = `${clientOrigin()}/offer/${raw}`;
+    const rendered = renderOfferEmail(letterTpl, buildOfferEmailFields({
+      fullName: offer.fullName,
+      position: offer.position,
+      department: offer.department,
+      joiningDate: offer.joiningDate,
+      offerDate: offer.offerDate,
+      location: offer.location,
+      company,
+      annualCTCPaisa: assignment?.annualCTC,
+      offerUrl
+    }));
+    subject = rendered.subject;
+    body = rendered.body;
+  }
+
+  await deliverOfferEmail({
+    offer,
+    fullName: offer.fullName,
+    offerUrl,
+    subject,
+    body,
+    annualCTCPaisa: assignment?.annualCTC,
+    company,
+    letterTpl
+  });
+
+  if (offer.status === 'pending') offer.status = 'sent';
+  await offer.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Offer email sent',
+    offer,
+    emailPreview: { subject, body },
     ...(exposeToken() ? { accessToken, offerUrl } : {})
   });
 });
@@ -297,6 +473,14 @@ export const approveOffer = asyncHandler(async (req, res) => {
     if (user) provisioning = await provisionEmployee(user, { offer });
   }
 
+  await logActivity({
+    actor: req.user,
+    action: 'offer.accept',
+    entityType: 'OfferLetter',
+    entityId: offer._id,
+    message: `${offer.fullName} offer approved${provisioning?.employeeId ? ` (${provisioning.employeeId})` : ''}`
+  });
+
   res.status(200).json({
     success: true,
     message: `Offer approved — login credentials emailed to ${offer.candidateEmail}`,
@@ -322,7 +506,108 @@ export const downloadOfferPdf = asyncHandler(async (req, res) => {
   fs.createReadStream(abs).pipe(res);
 });
 
-/** POST /api/offers/:id/resend — US 3.3, re-mint the magic link and re-email. */
+const unlinkQuiet = (rel) => {
+  if (!rel) return;
+  try {
+    const abs = path.resolve(process.cwd(), rel);
+    if (fs.existsSync(abs)) fs.unlinkSync(abs);
+  } catch { /* ignore */ }
+};
+
+/**
+ * POST /api/offers/:id/regenerate — rebuild the offer PDF from frozen salary + current letter template.
+ * Remints the magic link. Clears any prior e-signature. Does not email (use resend afterward).
+ */
+export const regenerateOffer = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid offer id');
+  const offer = await OfferLetter.findById(req.params.id);
+  if (!offer) throw new ApiError(404, 'Offer not found');
+  if (offer.status === 'accepted') throw new ApiError(400, 'Cannot regenerate an accepted offer');
+
+  const assignment = await EmployeeSalaryAssignment.findById(offer.salaryAssignmentId);
+  if (!assignment?.frozenMonthlyBreakdown) {
+    throw new ApiError(400, 'Salary assignment missing — cannot regenerate offer PDF');
+  }
+
+  const company = await Company.findById(offer.companyId);
+  const letterTpl = await resolveDefaultLetterTemplate('OfferLetter');
+  const previousPdf = offer.pdfFileUrl;
+  const previousSigned = offer.signedPdfFileUrl;
+
+  const { pdfFileUrl, acceptancePlacement } = await generateOfferLetterPdf({
+    fullName: offer.fullName,
+    position: offer.position,
+    department: offer.department,
+    offerDate: offer.offerDate,
+    joiningDate: offer.joiningDate,
+    breakdown: assignment.frozenMonthlyBreakdown,
+    annualCTC: assignment.annualCTC,
+    company,
+    candidateEmail: offer.candidateEmail,
+    phone: offer.phone || '',
+    city: offer.city || '',
+    location: offer.location || '',
+    bodyParagraphs: letterTpl?.bodyParagraphs || null
+  });
+
+  const { raw, hash } = generateToken();
+  offer.pdfFileUrl = pdfFileUrl;
+  offer.acceptancePlacement = acceptancePlacement;
+  offer.signedPdfFileUrl = null;
+  offer.digitalSignature = {
+    signatureBase64: null,
+    signedAt: null,
+    ipAddress: null,
+    verificationToken: null
+  };
+  offer.accessTokenHash = hash;
+  offer.accessTokenExpires = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);
+  // Signed offers fall back to pending so the candidate can re-sign the new PDF.
+  if (offer.status === 'signed') offer.status = 'pending';
+  await offer.save();
+
+  if (previousPdf && previousPdf !== pdfFileUrl) unlinkQuiet(previousPdf);
+  if (previousSigned) unlinkQuiet(previousSigned);
+
+  const offerUrl = `${clientOrigin()}/offer/${raw}`;
+  const emailPreview = renderOfferEmail(letterTpl, buildOfferEmailFields({
+    fullName: offer.fullName,
+    position: offer.position,
+    department: offer.department,
+    joiningDate: offer.joiningDate,
+    offerDate: offer.offerDate,
+    location: offer.location,
+    company,
+    annualCTCPaisa: assignment.annualCTC,
+    offerUrl
+  }));
+
+  res.status(200).json({
+    success: true,
+    message: 'Offer PDF regenerated',
+    offer,
+    emailPreview,
+    ...(exposeToken() ? { accessToken: raw, offerUrl } : {})
+  });
+});
+
+/** DELETE /api/offers/:id — remove offer and its PDF files. */
+export const deleteOffer = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid offer id');
+  const offer = await OfferLetter.findById(req.params.id);
+  if (!offer) throw new ApiError(404, 'Offer not found');
+  if (offer.status === 'accepted') {
+    throw new ApiError(400, 'Cannot delete an accepted offer — employee is already provisioned');
+  }
+
+  unlinkQuiet(offer.pdfFileUrl);
+  unlinkQuiet(offer.signedPdfFileUrl);
+  await offer.deleteOne();
+
+  res.status(200).json({ success: true, message: 'Offer deleted' });
+});
+
+/** POST /api/offers/:id/resend — US 3.3, re-mint the magic link and re-email with PDF. */
 export const resendOffer = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid offer id');
   const offer = await OfferLetter.findById(req.params.id);
@@ -332,10 +617,37 @@ export const resendOffer = asyncHandler(async (req, res) => {
   const { raw, hash } = generateToken();
   offer.accessTokenHash = hash;
   offer.accessTokenExpires = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);
+  if (offer.status === 'pending') offer.status = 'sent';
   await offer.save();
 
   const offerUrl = `${clientOrigin()}/offer/${raw}`;
-  await sendOfferInvite({ to: offer.candidateEmail, fullName: offer.fullName, offerUrl });
+  const company = await Company.findById(offer.companyId);
+  const letterTpl = await resolveDefaultLetterTemplate('OfferLetter');
+  const assignment = await EmployeeSalaryAssignment.findById(offer.salaryAssignmentId);
+  const emailPreview = renderOfferEmail(letterTpl, buildOfferEmailFields({
+    fullName: offer.fullName,
+    position: offer.position,
+    department: offer.department,
+    joiningDate: offer.joiningDate,
+    offerDate: offer.offerDate,
+    location: offer.location,
+    company,
+    annualCTCPaisa: assignment?.annualCTC,
+    offerUrl
+  }));
 
-  res.status(200).json({ success: true, message: 'Offer reminder sent', ...(exposeToken() ? { accessToken: raw, offerUrl } : {}) });
+  await deliverOfferEmail({
+    offer,
+    fullName: offer.fullName,
+    offerUrl,
+    subject: emailPreview.subject,
+    body: emailPreview.body
+  });
+
+  res.status(200).json({
+    success: true,
+    message: 'Offer reminder sent',
+    emailPreview,
+    ...(exposeToken() ? { accessToken: raw, offerUrl } : {})
+  });
 });

@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import mongoose from 'mongoose';
-import LetterTemplate, { LETTER_TYPES, LETTER_PLACEHOLDERS, LETTER_TYPE_LABELS } from '../models/LetterTemplate.js';
+import LetterTemplate, {
+  LETTER_TYPES, LETTER_PLACEHOLDERS, LETTER_TYPE_LABELS, DEFAULT_LETTER_EMAIL
+} from '../models/LetterTemplate.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { LETTER_TEMPLATE_DIR, letterTemplateRelPath } from '../middleware/uploadLetterTemplate.js';
@@ -12,6 +14,9 @@ const present = (t) => {
   const o = t.toObject ? t.toObject() : { ...t };
   o.typeLabel = LETTER_TYPE_LABELS[o.type] || o.type;
   o.hasFile = Boolean(o.fileUrl);
+  const defaults = DEFAULT_LETTER_EMAIL[o.type] || {};
+  o.emailSubject = o.emailSubject || defaults.subject || '';
+  o.emailBody = o.emailBody || defaults.body || '';
   return o;
 };
 
@@ -53,6 +58,7 @@ export const listLetterTemplates = asyncHandler(async (req, res) => {
       types: LETTER_TYPES,
       typeLabels: LETTER_TYPE_LABELS,
       placeholders: LETTER_PLACEHOLDERS,
+      emailDefaults: DEFAULT_LETTER_EMAIL,
       fieldsByType: Object.fromEntries(LETTER_TYPES.map((t) => [t, fieldsForLetterType(t)]))
     }
   });
@@ -60,7 +66,7 @@ export const listLetterTemplates = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/letter-templates
- * JSON or multipart: type, name, title?, bodyParagraphs?, isDefault?, file?
+ * JSON or multipart: type, name, title?, bodyParagraphs?, emailSubject?, emailBody?, isDefault?, file?
  */
 export const createLetterTemplate = asyncHandler(async (req, res) => {
   const type = req.body.type;
@@ -78,12 +84,18 @@ export const createLetterTemplate = asyncHandler(async (req, res) => {
   const isDefault = parseBool(req.body.isDefault, false);
   if (isDefault) await clearOtherDefaults(type);
 
+  const emailDefaults = DEFAULT_LETTER_EMAIL[type] || {};
+  const emailSubject = (req.body.emailSubject != null ? String(req.body.emailSubject) : emailDefaults.subject || '').trim();
+  const emailBody = (req.body.emailBody != null ? String(req.body.emailBody) : emailDefaults.body || '').trim();
+
   const payload = {
     companyId: req.user.companyId,
     type,
     name,
     title,
     bodyParagraphs: bodyParagraphs.map((s) => String(s).trim()).filter(Boolean),
+    emailSubject,
+    emailBody,
     isDefault,
     active: true
   };
@@ -112,6 +124,8 @@ export const updateLetterTemplate = asyncHandler(async (req, res) => {
   if (req.body.name !== undefined) template.name = String(req.body.name).trim();
   if (req.body.title !== undefined) template.title = String(req.body.title).trim();
   if (req.body.active !== undefined) template.active = parseBool(req.body.active, template.active);
+  if (req.body.emailSubject !== undefined) template.emailSubject = String(req.body.emailSubject).trim();
+  if (req.body.emailBody !== undefined) template.emailBody = String(req.body.emailBody);
   if (req.body.bodyParagraphs !== undefined) {
     let paras = req.body.bodyParagraphs;
     if (typeof paras === 'string') {

@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import OfferLetter from '../models/OfferLetter.js';
 import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
@@ -68,6 +70,21 @@ export const getOfferByToken = asyncHandler(async (req, res) => {
 });
 
 /**
+ * GET /api/candidate/offer/:token/pdf — stream the offer PDF for the magic-link portal.
+ */
+export const downloadOfferPdfByToken = asyncHandler(async (req, res) => {
+  const offer = await findOfferByToken(req.params.token);
+  const rel = offer.signedPdfFileUrl || offer.pdfFileUrl;
+  if (!rel) throw new ApiError(404, 'Offer PDF is not available');
+  const abs = path.resolve(process.cwd(), rel);
+  if (!fs.existsSync(abs)) throw new ApiError(404, 'Offer PDF is missing on disk');
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="offer-letter.pdf"`);
+  fs.createReadStream(abs).pipe(res);
+});
+
+/**
  * POST /api/candidate/offer/:token/sign
  * US 5.3 — e-sign the offer by submitting a drawn signature (base64 PNG).
  * Bakes the signature into the PDF, records a cryptographic verification hash,
@@ -93,7 +110,8 @@ export const signOffer = asyncHandler(async (req, res) => {
 
   const signedPdfFileUrl = await bakeSignatureOnOffer(offer.pdfFileUrl, signatureBase64, {
     name: offer.fullName,
-    signedAt
+    signedAt,
+    acceptancePlacement: offer.acceptancePlacement
   });
 
   // Awaiting approval — credentials are withheld until HR/Admin approves.

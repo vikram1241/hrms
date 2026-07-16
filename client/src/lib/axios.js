@@ -8,15 +8,19 @@ const api = axios.create({
   withCredentials: true
 });
 
-// Normalize error messages so the UI can always read `err.message`.
+// Normalize error messages so the UI can always read `err.uiMessage`.
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    const message =
+    const status = error.response?.status;
+    let message =
       error.response?.data?.message ||
       error.response?.data?.details?.[0]?.message ||
       error.message ||
       'Something went wrong';
+    if (status === 413) {
+      message = 'File is too large for the server. Check the allowed size and try again.';
+    }
     error.uiMessage = message;
     return Promise.reject(error);
   }

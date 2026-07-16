@@ -11,7 +11,7 @@ import useAsync from '../../hooks/useAsync.js';
 import { getHubOverview } from '../../api/selfService.js';
 import { payslipPdfUrl } from '../../api/payslips.js';
 
-const STAGE_PCT = { personal: 25, family: 50, contact: 75, bank: 90, completed: 100 };
+const STAGE_PCT = { personal: 20, family: 35, contact: 50, experience: 70, bank: 90, completed: 100 };
 
 export default function EmployeeHub() {
   const { data, loading } = useAsync(() => getHubOverview(), []);

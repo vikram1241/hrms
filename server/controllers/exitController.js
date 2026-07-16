@@ -5,6 +5,7 @@ import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { generateCompanyDocPdf } from '../services/pdfService.js';
+import { logActivity } from '../services/activityService.js';
 
 const fullName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
 
@@ -17,6 +18,13 @@ export const initiateExit = asyncHandler(async (req, res) => {
   if (!user) throw new ApiError(404, 'Employee not found');
 
   const record = await ExitRecord.create({ userId, resignationDate, lastWorkingDay, reason, status: 'Initiated' });
+  await logActivity({
+    actor: req.user,
+    action: 'exit.initiate',
+    entityType: 'ExitRecord',
+    entityId: record._id,
+    message: `Exit initiated for ${fullName(user) || user.email}`
+  });
   res.status(201).json({ success: true, message: 'Exit initiated', record });
 });
 
@@ -92,6 +100,13 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
     ]
   });
   await record.save();
+  await logActivity({
+    actor: req.user,
+    action: 'exit.letters',
+    entityType: 'ExitRecord',
+    entityId: record._id,
+    message: `Exit letters generated for ${name}`
+  });
 
   res.status(200).json({
     success: true,
@@ -99,4 +114,30 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
     relievingLetterUrl: record.relievingLetterUrl,
     experienceLetterUrl: record.experienceLetterUrl
   });
+});
+
+/** DELETE /api/exits/:id — only when Initiated and no letters issued. */
+export const deleteExit = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid id');
+  const record = await ExitRecord.findById(req.params.id);
+  if (!record) throw new ApiError(404, 'Exit record not found');
+  if (record.status === 'Completed') {
+    throw new ApiError(400, 'Completed exits cannot be deleted');
+  }
+  if (record.relievingLetterUrl || record.experienceLetterUrl) {
+    throw new ApiError(400, 'Exit with generated letters cannot be deleted');
+  }
+  if (record.status !== 'Initiated') {
+    throw new ApiError(400, 'Only exits in Initiated status can be deleted');
+  }
+  const user = await User.findById(record.userId).select('personalDetails email');
+  await record.deleteOne();
+  await logActivity({
+    actor: req.user,
+    action: 'exit.delete',
+    entityType: 'ExitRecord',
+    entityId: req.params.id,
+    message: `Exit record deleted for ${user ? fullName(user) || user.email : 'employee'}`
+  });
+  res.status(200).json({ success: true, message: 'Exit record deleted' });
 });

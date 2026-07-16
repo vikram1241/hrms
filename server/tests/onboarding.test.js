@@ -10,7 +10,7 @@ before(async () => { await db.connect(); });
 after(async () => { await db.close(); });
 beforeEach(async () => { await db.clear(); });
 
-test('onboarding wizard advances stage through all four steps', async () => {
+test('onboarding wizard advances stage through all five steps', async () => {
   const { agent } = await authAgent(app, { email: 'newjoiner@xyz.com', role: 'employee' });
 
   let status = await agent.get('/api/onboarding/status');
@@ -23,6 +23,10 @@ test('onboarding wizard advances stage through all four steps', async () => {
     emergencyContactPhone: '9876500000', presentAddress: { street: '123 Tech Lane', city: 'Hyderabad', state: 'Telangana', zipCode: '500001' },
     sameAsPresent: true
   });
+  const exp = await agent.patch('/api/onboarding/experience').send({ notApplicable: true, experienceHistory: [] });
+  assert.equal(exp.body.stage, 'bank');
+  assert.equal(exp.body.previousEmployerNotApplicable, true);
+
   const bank = await agent.patch('/api/onboarding/bank').send({
     accountHolderName: 'Rahul Kumar', accountNumber: '123456789012', bankName: 'HDFC', ifscCode: 'HDFC0001234', panNumber: 'ABCDE1234F'
   });
@@ -32,6 +36,7 @@ test('onboarding wizard advances stage through all four steps', async () => {
   assert.equal(status.body.sections.personal, true);
   assert.equal(status.body.sections.family, true);
   assert.equal(status.body.sections.contact, true);
+  assert.equal(status.body.sections.experience, true);
   assert.equal(status.body.sections.bank, true);
 });
 

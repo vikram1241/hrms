@@ -11,8 +11,20 @@ RUN npm ci --only=production
 # Copy application code
 COPY . .
 
-# Create uploads directory for document storage (env comes from docker-compose)
-RUN mkdir -p uploads/documents
+# Placeholder dirs (overlaid at runtime by the docker-compose bind mount)
+RUN mkdir -p \
+  uploads/documents \
+  uploads/documents/generated \
+  uploads/documents/filled \
+  uploads/training \
+  uploads/company \
+  uploads/avatars \
+  uploads/offers/signed \
+  uploads/payslips \
+  uploads/letter-templates \
+  uploads/cf-templates \
+  uploads/cf-issued \
+  logs
 
 # Expose port
 EXPOSE 5000

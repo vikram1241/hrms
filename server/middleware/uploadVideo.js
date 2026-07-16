@@ -9,6 +9,12 @@ import ApiError from '../utils/ApiError.js';
 export const TRAINING_DIR = path.resolve(process.cwd(), 'uploads', 'training');
 fs.mkdirSync(TRAINING_DIR, { recursive: true });
 
+/** Max training video size (bytes). Keep in sync with client UI + nginx. */
+export const MAX_TRAINING_VIDEO_BYTES = 200 * 1024 * 1024;
+export const MAX_TRAINING_VIDEO_MB = 200;
+export const TRAINING_VIDEO_ACCEPT = 'video/mp4,video/webm,video/quicktime';
+export const TRAINING_VIDEO_FORMAT_LABEL = 'MP4, WEBM, or MOV';
+
 const ALLOWED_MIME = new Map([
   ['video/mp4', '.mp4'],
   ['video/webm', '.webm'],
@@ -21,7 +27,9 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  if (!ALLOWED_MIME.has(file.mimetype)) return cb(new ApiError(400, 'Video must be MP4, WEBM or MOV'));
+  if (!ALLOWED_MIME.has(file.mimetype)) {
+    return cb(new ApiError(400, `Video must be ${TRAINING_VIDEO_FORMAT_LABEL}`));
+  }
   cb(null, true);
 };
 
@@ -29,5 +37,5 @@ const fileFilter = (req, file, cb) => {
 export const uploadVideo = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 200 * 1024 * 1024, files: 1 }
+  limits: { fileSize: MAX_TRAINING_VIDEO_BYTES, files: 1 }
 }).single('video');

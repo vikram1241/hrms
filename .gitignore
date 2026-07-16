@@ -16,6 +16,9 @@ build/
 # Uploaded files (avatars, documents, payslips, offers)
 server/uploads/
 
+# Docker bind-mount data (survives rebuilds; not in git)
+data/
+
 # Logs
 *.log
 npm-debug.log*
