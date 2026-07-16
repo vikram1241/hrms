@@ -12,7 +12,9 @@ const IncentiveSchema = new mongoose.Schema({
   period: { type: String, required: true, trim: true },
   amount: { type: Number, required: true }, // paisa
   reason: { type: String, trim: true },
-  status: { type: String, enum: ['Proposed', 'Approved', 'Paid'], default: 'Proposed', index: true }
+  status: { type: String, enum: ['Proposed', 'Approved', 'Paid'], default: 'Proposed', index: true },
+  attachmentFileId: { type: String, default: null },
+  attachmentFileName: { type: String, default: null }
 }, { timestamps: true });
 IncentiveSchema.plugin(tenantScope);
 
@@ -24,7 +26,9 @@ const AppraisalSchema = new mongoose.Schema({
   newDesignation: { type: String, trim: true },
   previousCTC: { type: Number }, // paisa
   newCTC: { type: Number },      // paisa
-  remarks: { type: String, trim: true }
+  remarks: { type: String, trim: true },
+  attachmentFileId: { type: String, default: null },
+  attachmentFileName: { type: String, default: null }
 }, { timestamps: true });
 AppraisalSchema.plugin(tenantScope);
 

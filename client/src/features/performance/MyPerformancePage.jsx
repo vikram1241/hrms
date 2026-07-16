@@ -1,15 +1,21 @@
+import { Download } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { myReviews, myIncentives, myTrainingRecords } from '../../api/performance.js';
+import { myReviews, myIncentives, myAppraisals, myTrainingRecords, incentiveAttachmentUrl, appraisalAttachmentUrl } from '../../api/performance.js';
 
 const rupees = (p) => `INR ${((p || 0) / 100).toLocaleString('en-IN')}`;
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 
+const AttachmentLink = ({ fileId, url }) => fileId
+  ? <a className="inline-flex items-center gap-1 text-primary-600 hover:underline" href={url} target="_blank" rel="noreferrer"><Download size={14} /> View</a>
+  : <span className="text-muted">—</span>;
+
 export default function MyPerformancePage() {
   const reviews = useAsync(myReviews, []);
   const incentives = useAsync(myIncentives, []);
+  const appraisals = useAsync(myAppraisals, []);
   const training = useAsync(myTrainingRecords, []);
 
   return (
@@ -39,17 +45,30 @@ export default function MyPerformancePage() {
         <Card><CardBody>
           <h3 className="mb-3 text-base font-semibold text-ink">Incentives</h3>
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-muted"><th className="pb-2">Period</th><th className="pb-2">Amount</th><th className="pb-2">Status</th></tr></thead>
+            <thead><tr className="text-left text-muted"><th className="pb-2">Period</th><th className="pb-2">Amount</th><th className="pb-2">Status</th><th className="pb-2">Attachment</th></tr></thead>
             <tbody>
               {(incentives.data || []).map((i) => (
-                <tr key={i._id} className="border-t border-line"><td className="py-2">{i.period}</td><td className="py-2">{rupees(i.amount)}</td><td className="py-2"><StatusBadge status={i.status} /></td></tr>
+                <tr key={i._id} className="border-t border-line"><td className="py-2">{i.period}</td><td className="py-2">{rupees(i.amount)}</td><td className="py-2"><StatusBadge status={i.status} /></td><td className="py-2"><AttachmentLink fileId={i.attachmentFileId} url={incentiveAttachmentUrl(i._id)} /></td></tr>
               ))}
-              {!incentives.data?.length && <tr><td colSpan={3} className="py-4 text-center text-muted">No incentives.</td></tr>}
+              {!incentives.data?.length && <tr><td colSpan={4} className="py-4 text-center text-muted">No incentives.</td></tr>}
             </tbody>
           </table>
         </CardBody></Card>
 
         <Card><CardBody>
+          <h3 className="mb-3 text-base font-semibold text-ink">Promotions</h3>
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-muted"><th className="pb-2">Effective date</th><th className="pb-2">New designation</th><th className="pb-2">Attachment</th></tr></thead>
+            <tbody>
+              {(appraisals.data || []).map((a) => (
+                <tr key={a._id} className="border-t border-line"><td className="py-2">{fmt(a.effectiveDate)}</td><td className="py-2">{a.newDesignation || '—'}</td><td className="py-2"><AttachmentLink fileId={a.attachmentFileId} url={appraisalAttachmentUrl(a._id)} /></td></tr>
+              ))}
+              {!appraisals.data?.length && <tr><td colSpan={3} className="py-4 text-center text-muted">No promotions yet.</td></tr>}
+            </tbody>
+          </table>
+        </CardBody></Card>
+
+        <Card className="lg:col-span-2"><CardBody>
           <h3 className="mb-3 text-base font-semibold text-ink">Training records</h3>
           <table className="w-full text-sm">
             <thead><tr className="text-left text-muted"><th className="pb-2">Title</th><th className="pb-2">Completed</th><th className="pb-2">Status</th></tr></thead>

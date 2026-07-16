@@ -1,32 +1,58 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { Plus, Trash2, Gauge } from 'lucide-react';
+import { Plus, Gauge, Upload, Download } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import FormDialog from '../../components/ui/FormDialog.jsx';
+import DataGrid from '../../components/ui/DataGrid.jsx';
 import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { listReviews, createReview, createIncentive, listIncentives, createAppraisal, createTrainingRecord } from '../../api/performance.js';
+import {
+  listReviews, createReview,
+  createIncentive, listIncentives, incentiveAttachmentUrl,
+  createAppraisal, listAppraisals, appraisalAttachmentUrl,
+  createTrainingRecord
+} from '../../api/performance.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const rupees = (p) => `INR ${((p || 0) / 100).toLocaleString('en-IN')}`;
 const today = () => new Date().toISOString().slice(0, 10);
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+
+// userId arrives populated ({ personalDetails, employeeDetails }) from the list endpoints.
+const employeeName = (u) => {
+  if (!u || typeof u === 'string') return u || '—';
+  const name = `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
+  return name ? `${name}${u.employeeDetails?.employeeId ? ` (${u.employeeDetails.employeeId})` : ''}` : '—';
+};
+
+const AttachmentLink = ({ fileId, url }) => fileId
+  ? <a className="inline-flex items-center gap-1 text-primary-600 hover:underline" href={url} target="_blank" rel="noreferrer"><Download size={14} /> View</a>
+  : <span className="text-muted">—</span>;
+
+const FileField = ({ file, onChange }) => (
+  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-sm text-muted hover:border-primary-400">
+    <Upload size={16} /> {file ? file.name : 'Attach supporting PDF (optional)'}
+    <input type="file" accept="application/pdf" hidden onChange={(e) => onChange(e.target.files?.[0] || null)} />
+  </label>
+);
 
 export default function PerformancePage() {
   const dispatch = useDispatch();
   const reviews = useAsync(() => listReviews(), []);
   const incentives = useAsync(() => listIncentives(), []);
+  const appraisals = useAsync(() => listAppraisals(), []);
 
   const [revOpen, setRevOpen] = useState(false);
   const [rev, setRev] = useState({ userId: '', period: '', overallRating: 3, comments: '', status: 'Published', kpis: [] });
   const [busy, setBusy] = useState(false);
 
-  const [inc, setInc] = useState({ userId: '', period: '', amountRupees: '', reason: '' });
-  const [apr, setApr] = useState({ userId: '', effectiveDate: today(), newDesignation: '', newCTCRupees: '', remarks: '' });
+  const [inc, setInc] = useState({ userId: '', period: '', amountRupees: '', reason: '', file: null });
+  const [apr, setApr] = useState({ userId: '', effectiveDate: today(), newDesignation: '', newCTCRupees: '', remarks: '', file: null });
   const [trn, setTrn] = useState({ userId: '', title: '', provider: '', status: 'Assigned' });
 
   const saveReview = async (e) => {
@@ -42,13 +68,24 @@ export default function PerformancePage() {
 
   const saveInc = async () => {
     if (!inc.userId || !inc.period || !inc.amountRupees) return dispatch(notifyError('Employee, period and amount are required.'));
-    try { await createIncentive({ userId: inc.userId, period: inc.period, amount: Math.round(Number(inc.amountRupees) * 100), reason: inc.reason }); dispatch(notifySuccess('Incentive recorded.')); setInc({ userId: '', period: '', amountRupees: '', reason: '' }); incentives.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    try {
+      await createIncentive({ userId: inc.userId, period: inc.period, amount: Math.round(Number(inc.amountRupees) * 100), reason: inc.reason }, inc.file);
+      dispatch(notifySuccess('Incentive recorded.'));
+      setInc({ userId: '', period: '', amountRupees: '', reason: '', file: null });
+      incentives.reload();
+    } catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
   const saveApr = async () => {
     if (!apr.userId) return dispatch(notifyError('Select an employee.'));
-    try { await createAppraisal({ userId: apr.userId, effectiveDate: apr.effectiveDate, newDesignation: apr.newDesignation, newCTC: apr.newCTCRupees ? Math.round(Number(apr.newCTCRupees) * 100) : undefined, remarks: apr.remarks }); dispatch(notifySuccess('Appraisal recorded.')); setApr({ userId: '', effectiveDate: today(), newDesignation: '', newCTCRupees: '', remarks: '' }); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+    try {
+      await createAppraisal({
+        userId: apr.userId, effectiveDate: apr.effectiveDate, newDesignation: apr.newDesignation,
+        newCTC: apr.newCTCRupees ? Math.round(Number(apr.newCTCRupees) * 100) : undefined, remarks: apr.remarks
+      }, apr.file);
+      dispatch(notifySuccess('Promotion recorded.'));
+      setApr({ userId: '', effectiveDate: today(), newDesignation: '', newCTCRupees: '', remarks: '', file: null });
+      appraisals.reload();
+    } catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
   const saveTrn = async () => {
     if (!trn.userId || !trn.title) return dispatch(notifyError('Employee and title are required.'));
@@ -56,9 +93,27 @@ export default function PerformancePage() {
     catch (err) { dispatch(notifyError(err.uiMessage)); }
   };
 
+  const incentiveColumns = useMemo(() => [
+    { headerName: 'Employee', valueGetter: (p) => employeeName(p.data.userId), minWidth: 200, flex: 2 },
+    { headerName: 'Period', field: 'period', maxWidth: 130 },
+    { headerName: 'Amount', valueGetter: (p) => p.data.amount, valueFormatter: (p) => rupees(p.value), maxWidth: 150 },
+    { headerName: 'Reason', field: 'reason', flex: 2 },
+    { headerName: 'Status', field: 'status', cellRenderer: (p) => <StatusBadge status={p.value} />, filter: false, maxWidth: 140 },
+    { headerName: 'Attachment', cellRenderer: (p) => <AttachmentLink fileId={p.data.attachmentFileId} url={incentiveAttachmentUrl(p.data._id)} />, filter: false, sortable: false, maxWidth: 130 }
+  ], []);
+
+  const appraisalColumns = useMemo(() => [
+    { headerName: 'Employee', valueGetter: (p) => employeeName(p.data.userId), minWidth: 200, flex: 2 },
+    { headerName: 'Effective date', valueGetter: (p) => p.data.effectiveDate, valueFormatter: (p) => fmtDate(p.value), maxWidth: 150 },
+    { headerName: 'Previous designation', field: 'previousDesignation', flex: 1 },
+    { headerName: 'New designation', field: 'newDesignation', flex: 1 },
+    { headerName: 'New CTC', valueGetter: (p) => p.data.newCTC, valueFormatter: (p) => (p.value ? rupees(p.value) : '—'), maxWidth: 140 },
+    { headerName: 'Attachment', cellRenderer: (p) => <AttachmentLink fileId={p.data.attachmentFileId} url={appraisalAttachmentUrl(p.data._id)} />, filter: false, sortable: false, maxWidth: 130 }
+  ], []);
+
   return (
     <div>
-      <PageHeader title="Performance & Training" subtitle="Reviews, incentives, appraisals and training records"
+      <PageHeader title="Performance & Training" subtitle="Reviews, incentives, promotions and training records"
         actions={<Button onClick={() => setRevOpen(true)}><Plus size={16} /> New review</Button>} />
 
       <Card className="mb-4"><CardBody>
@@ -74,41 +129,48 @@ export default function PerformancePage() {
         </table>
       </CardBody></Card>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card><CardBody>
-          <h3 className="mb-3 text-base font-semibold text-ink">Add incentive</h3>
-          <div className="space-y-2">
-            <EmployeeSelect value={inc.userId} onChange={(v) => setInc({ ...inc, userId: v })} />
-            <TextField size="small" fullWidth label="Period (e.g. Q1-2026)" value={inc.period} onChange={(e) => setInc({ ...inc, period: e.target.value })} />
-            <TextField size="small" fullWidth label="Amount (₹)" type="number" value={inc.amountRupees} onChange={(e) => setInc({ ...inc, amountRupees: e.target.value })} />
-            <Button size="sm" onClick={saveInc}>Save incentive</Button>
+      <Card className="mb-4"><CardBody>
+        <h3 className="mb-3 text-base font-semibold text-ink">Incentives</h3>
+        <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-5 md:items-start">
+          <EmployeeSelect value={inc.userId} onChange={(v) => setInc({ ...inc, userId: v })} />
+          <TextField size="small" fullWidth label="Period (e.g. Q1-2026)" value={inc.period} onChange={(e) => setInc({ ...inc, period: e.target.value })} />
+          <TextField size="small" fullWidth label="Amount (₹)" type="number" value={inc.amountRupees} onChange={(e) => setInc({ ...inc, amountRupees: e.target.value })} />
+          <TextField size="small" fullWidth label="Reason" value={inc.reason} onChange={(e) => setInc({ ...inc, reason: e.target.value })} />
+          <div className="flex items-center gap-2">
+            <FileField file={inc.file} onChange={(f) => setInc({ ...inc, file: f })} />
           </div>
-        </CardBody></Card>
+        </div>
+        <Button size="sm" onClick={saveInc} className="mb-4"><Plus size={13} /> Save incentive</Button>
+        <DataGrid rowData={incentives.data || []} columnDefs={incentiveColumns} loading={incentives.loading} height={360} />
+      </CardBody></Card>
 
-        <Card><CardBody>
-          <h3 className="mb-3 text-base font-semibold text-ink">Record appraisal</h3>
-          <div className="space-y-2">
-            <EmployeeSelect value={apr.userId} onChange={(v) => setApr({ ...apr, userId: v })} />
-            <TextField size="small" fullWidth type="date" label="Effective date" InputLabelProps={{ shrink: true }} value={apr.effectiveDate} onChange={(e) => setApr({ ...apr, effectiveDate: e.target.value })} />
-            <TextField size="small" fullWidth label="New designation" value={apr.newDesignation} onChange={(e) => setApr({ ...apr, newDesignation: e.target.value })} />
-            <TextField size="small" fullWidth label="New CTC (₹)" type="number" value={apr.newCTCRupees} onChange={(e) => setApr({ ...apr, newCTCRupees: e.target.value })} />
-            <Button size="sm" onClick={saveApr}>Save appraisal</Button>
+      <Card className="mb-4"><CardBody>
+        <h3 className="mb-3 text-base font-semibold text-ink">Promotions</h3>
+        <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-5 md:items-start">
+          <EmployeeSelect value={apr.userId} onChange={(v) => setApr({ ...apr, userId: v })} />
+          <TextField size="small" fullWidth type="date" label="Effective date" InputLabelProps={{ shrink: true }} value={apr.effectiveDate} onChange={(e) => setApr({ ...apr, effectiveDate: e.target.value })} />
+          <TextField size="small" fullWidth label="New designation" value={apr.newDesignation} onChange={(e) => setApr({ ...apr, newDesignation: e.target.value })} />
+          <TextField size="small" fullWidth label="New CTC (₹)" type="number" value={apr.newCTCRupees} onChange={(e) => setApr({ ...apr, newCTCRupees: e.target.value })} />
+          <div className="flex items-center gap-2">
+            <FileField file={apr.file} onChange={(f) => setApr({ ...apr, file: f })} />
           </div>
-        </CardBody></Card>
+        </div>
+        <Button size="sm" onClick={saveApr} className="mb-4"><Plus size={13} /> Save promotion</Button>
+        <DataGrid rowData={appraisals.data || []} columnDefs={appraisalColumns} loading={appraisals.loading} height={360} />
+      </CardBody></Card>
 
-        <Card><CardBody>
-          <h3 className="mb-3 text-base font-semibold text-ink">Add training record</h3>
-          <div className="space-y-2">
-            <EmployeeSelect value={trn.userId} onChange={(v) => setTrn({ ...trn, userId: v })} />
-            <TextField size="small" fullWidth label="Title" value={trn.title} onChange={(e) => setTrn({ ...trn, title: e.target.value })} />
-            <TextField size="small" fullWidth label="Provider" value={trn.provider} onChange={(e) => setTrn({ ...trn, provider: e.target.value })} />
-            <TextField select size="small" fullWidth label="Status" value={trn.status} onChange={(e) => setTrn({ ...trn, status: e.target.value })}>
-              {['Assigned', 'In-Progress', 'Completed'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-            </TextField>
-            <Button size="sm" onClick={saveTrn}>Save record</Button>
-          </div>
-        </CardBody></Card>
-      </div>
+      <Card><CardBody>
+        <h3 className="mb-3 text-base font-semibold text-ink">Add training record</h3>
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+          <EmployeeSelect value={trn.userId} onChange={(v) => setTrn({ ...trn, userId: v })} />
+          <TextField size="small" fullWidth label="Title" value={trn.title} onChange={(e) => setTrn({ ...trn, title: e.target.value })} />
+          <TextField size="small" fullWidth label="Provider" value={trn.provider} onChange={(e) => setTrn({ ...trn, provider: e.target.value })} />
+          <TextField select size="small" fullWidth label="Status" value={trn.status} onChange={(e) => setTrn({ ...trn, status: e.target.value })}>
+            {['Assigned', 'In-Progress', 'Completed'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+          </TextField>
+        </div>
+        <Button size="sm" onClick={saveTrn} className="mt-3">Save record</Button>
+      </CardBody></Card>
 
       <FormDialog open={revOpen} onClose={() => setRevOpen(false)} title="New performance review" onSubmit={saveReview} loading={busy} submitLabel="Save review" maxWidth="md">
         <div className="space-y-3 py-1">

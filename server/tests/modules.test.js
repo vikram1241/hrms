@@ -96,6 +96,38 @@ test('Epic 12 — performance review published is visible to the employee', asyn
   assert.equal((await emp.get('/api/performance/reviews/mine')).body.data.length, 1);
 });
 
+test('Epic 12 addendum — incentive/appraisal attachment upload, streaming and access control', async () => {
+  const { admin, emp, employee } = await setup();
+  const { agent: other } = await authAgent(app, { email: 'other@xyz.com', role: 'employee' });
+  const pdf = Buffer.from('%PDF-1.4 test');
+
+  const incentive = await admin.post('/api/performance/incentives')
+    .field('userId', String(employee._id)).field('period', 'Q1-2026').field('amount', '500000')
+    .attach('document', pdf, { filename: 'incentive-memo.pdf', contentType: 'application/pdf' });
+  assert.equal(incentive.status, 201);
+  assert.ok(incentive.body.incentive.attachmentFileId);
+  assert.equal(incentive.body.incentive.attachmentFileName, 'incentive-memo.pdf');
+
+  const appraisal = await admin.post('/api/performance/appraisals')
+    .field('userId', String(employee._id)).field('effectiveDate', '2026-04-01').field('newDesignation', 'Senior Engineer')
+    .attach('document', pdf, { filename: 'promotion-letter.pdf', contentType: 'application/pdf' });
+  assert.equal(appraisal.status, 201);
+  assert.ok(appraisal.body.appraisal.attachmentFileId);
+
+  // Owner and HR (performance:manage) can stream; an unrelated employee cannot.
+  assert.equal((await emp.get(`/api/performance/incentives/${incentive.body.incentive._id}/attachment`)).status, 200);
+  assert.equal((await admin.get(`/api/performance/appraisals/${appraisal.body.appraisal._id}/attachment`)).status, 200);
+  assert.equal((await other.get(`/api/performance/incentives/${incentive.body.incentive._id}/attachment`)).status, 403);
+
+  // A record with no attachment 404s cleanly.
+  const bare = await admin.post('/api/performance/incentives')
+    .field('userId', String(employee._id)).field('period', 'Q2-2026').field('amount', '100000');
+  assert.equal((await emp.get(`/api/performance/incentives/${bare.body.incentive._id}/attachment`)).status, 404);
+
+  // Employee sees their own promotion history.
+  assert.equal((await emp.get('/api/performance/appraisals/mine')).body.data.length, 1);
+});
+
 test('Epic 18 — training section create + list', async () => {
   const { admin, emp } = await setup();
   assert.equal((await admin.post('/api/training/sections').send({ title: 'Onboarding' })).status, 201);
