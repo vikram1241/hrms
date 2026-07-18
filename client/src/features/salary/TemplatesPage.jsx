@@ -20,6 +20,14 @@ import { CALC_TYPES } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const typeLabel = (t) => CALC_TYPES.find((c) => c.value === t)?.label || t;
+const factorLabel = (row) => {
+  if (row.calculationType === 'balance_of_ctc') return 'Balance';
+  if (row.calculationType === 'fixed') {
+    const rupees = Number(row.valueFactor || 0) / 100;
+    return `₹${rupees.toLocaleString('en-IN')}`;
+  }
+  return `${row.valueFactor}%`;
+};
 
 export default function TemplatesPage() {
   const dispatch = useDispatch();
@@ -86,7 +94,10 @@ export default function TemplatesPage() {
                     <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary-700">Earnings</p>
                     <ul className="space-y-1 text-sm">
                       {t.earningsStructure.map((e) => (
-                        <li key={e.key} className="flex justify-between gap-2"><span className="text-muted">{e.label}</span><span className="text-ink">{typeLabel(e.calculationType)}</span></li>
+                        <li key={e.key} className="flex justify-between gap-2">
+                          <span className="text-muted">{e.label}</span>
+                          <span className="text-ink">{factorLabel(e)} <span className="text-muted">· {typeLabel(e.calculationType)}</span></span>
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -94,7 +105,10 @@ export default function TemplatesPage() {
                     <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-danger">Deductions</p>
                     <ul className="space-y-1 text-sm">
                       {t.deductionsStructure.map((d) => (
-                        <li key={d.key} className="flex justify-between gap-2"><span className="text-muted">{d.label}</span><span className="text-ink">{typeLabel(d.calculationType)}</span></li>
+                        <li key={d.key} className="flex justify-between gap-2">
+                          <span className="text-muted">{d.label}</span>
+                          <span className="text-ink">{factorLabel(d)} <span className="text-muted">· {typeLabel(d.calculationType)}</span></span>
+                        </li>
                       ))}
                     </ul>
                   </div>

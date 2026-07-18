@@ -6,20 +6,18 @@ import User from '../models/User.js';
 import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { generateCompanyDocPdf, bakeSignatureOnDoc, generateLetterFromTemplate, GENERATED_DOC_DIR } from '../services/pdfService.js';
-import { resolveDefaultLetterTemplate } from './letterTemplateController.js';
+import { generateCompanyDocPdf, bakeSignatureOnDoc } from '../services/pdfService.js';
+import { buildAppointmentLetterPdf, appointmentFileName } from '../services/appointmentLetterService.js';
 
 const fullName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
 
 // Document templates. `requiresSignature` decides acknowledge-checkbox vs counter-sign.
 const TEMPLATES = {
   AppointmentLetter: {
-    title: 'Letter of Appointment',
+    title: 'APPOINTMENT LETTER',
     requiresSignature: true,
     paragraphs: (ctx) => [
-      `This letter confirms your appointment as ${ctx.designation || 'an employee'} at ${ctx.companyName}, effective ${new Date(ctx.effectiveDate).toDateString()}.`,
-      `Your employment is governed by the terms of your offer letter, the employee handbook, and the company's policies as amended from time to time.`,
-      `Please sign below to accept this appointment.`
+      `We are pleased to confirm your appointment as ${ctx.designation || 'an employee'} with effect from ${new Date(ctx.effectiveDate).toDateString()}.`
     ]
   },
   NDA: {
@@ -54,7 +52,7 @@ const TEMPLATES = {
  * employee (Epic 10). Body: { userId, type, effectiveDate?, designation?, ...inputs }
  */
 export const issueDocument = asyncHandler(async (req, res) => {
-  const { userId, type, effectiveDate, designation } = req.body;
+  const { userId, type, effectiveDate, designation, location, reportingArea } = req.body;
   if (!GENERATED_DOC_TYPES.includes(type)) throw new ApiError(400, `type must be one of: ${GENERATED_DOC_TYPES.join(', ')}`);
   if (!mongoose.isValidObjectId(userId)) throw new ApiError(400, 'Valid userId is required');
 
@@ -70,33 +68,25 @@ export const issueDocument = asyncHandler(async (req, res) => {
     effectiveDate: effectiveDate || Date.now()
   };
 
-  // Prefer a uploaded LetterTemplate when issuing AppointmentLetter (C&F-style fill + seal).
   let pdfFileUrl;
   let title = tpl.title;
   let requiresSignature = tpl.requiresSignature;
+  let downloadFileName = null;
 
   if (type === 'AppointmentLetter') {
-    const letterTpl = await resolveDefaultLetterTemplate('AppointmentLetter');
-    if (letterTpl) {
-      title = letterTpl.title || letterTpl.name || tpl.title;
-      pdfFileUrl = await generateLetterFromTemplate({
-        template: letterTpl,
-        fields: {
-          employeeName: ctx.employeeName,
-          designation: ctx.designation || '',
-          department: user.employeeDetails?.department || '',
-          employeeId: user.employeeDetails?.employeeId || '',
-          joiningDate: new Date(ctx.effectiveDate).toDateString(),
-          date: new Date(ctx.effectiveDate).toDateString(),
-          companyName: ctx.companyName
-        },
-        company,
-        destDir: GENERATED_DOC_DIR
-      });
-    }
-  }
-
-  if (!pdfFileUrl) {
+    const reporting = String(location || reportingArea || user.employeeDetails?.workLocation || '').trim();
+    const built = await buildAppointmentLetterPdf({
+      user,
+      company,
+      designation: ctx.designation,
+      effectiveDate: ctx.effectiveDate,
+      department: user.employeeDetails?.department,
+      location: reporting
+    });
+    pdfFileUrl = built.pdfFileUrl;
+    title = built.title;
+    downloadFileName = built.fileName;
+  } else {
     pdfFileUrl = await generateCompanyDocPdf({
       title: tpl.title,
       paragraphs: tpl.paragraphs(ctx),
@@ -111,7 +101,11 @@ export const issueDocument = asyncHandler(async (req, res) => {
     userId: user._id,
     type,
     title,
-    inputs: { effectiveDate: ctx.effectiveDate, designation: ctx.designation },
+    inputs: {
+      effectiveDate: ctx.effectiveDate,
+      designation: ctx.designation,
+      ...(downloadFileName ? { downloadFileName } : {})
+    },
     pdfFileUrl,
     requiresSignature,
     issuedBy: req.user._id
@@ -146,8 +140,17 @@ export const streamDocumentPdf = asyncHandler(async (req, res) => {
   const rel = doc.acknowledgedPdfFileUrl || doc.pdfFileUrl;
   const abs = path.resolve(process.cwd(), rel);
   if (!fs.existsSync(abs)) throw new ApiError(404, 'PDF missing on disk');
+  let fileName = `doc-${doc._id}.pdf`;
+  if (doc.type === 'AppointmentLetter') {
+    if (doc.inputs?.downloadFileName) {
+      fileName = doc.inputs.downloadFileName;
+    } else {
+      const owner = await User.findById(doc.userId).select('personalDetails');
+      fileName = appointmentFileName(fullName(owner) || fullName(req.user));
+    }
+  }
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="doc-${doc._id}.pdf"`);
+  res.setHeader('Content-Disposition', `inline; filename="${String(fileName).replace(/"/g, '')}"`);
   fs.createReadStream(abs).pipe(res);
 });
 

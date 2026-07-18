@@ -10,7 +10,8 @@ export const uploadMedia = ({ sectionId, title, description, file }) => {
   fd.append('sectionId', sectionId);
   fd.append('title', title);
   if (description) fd.append('description', description);
-  return api.post('/training/media', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data.media);
+  // Do not set Content-Type manually — the browser must add the multipart boundary.
+  return api.post('/training/media', fd, { timeout: 10 * 60 * 1000 }).then((r) => r.data.media);
 };
 export const deleteMedia = (id) => api.delete(`/training/media/${id}`).then((r) => r.data);
 export const mediaStreamUrl = (id) => `/api/training/media/${id}/stream`;

@@ -2,12 +2,13 @@ import { body } from 'express-validator';
 import { DOCUMENT_TYPES } from '../models/User.js';
 
 export const personalRules = [
-  body('firstName').optional().isString().trim().notEmpty(),
-  body('lastName').optional().isString().trim().notEmpty(),
-  body('dateOfBirth').optional().isISO8601().withMessage('dateOfBirth must be a valid date'),
-  body('gender').optional().isIn(['Male', 'Female', 'Non-binary', 'Prefer not to say']),
-  body('bloodGroup').optional().isIn(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']),
-  body('maritalStatus').optional().isIn(['Single', 'Married', 'Divorced', 'Widowed'])
+  body('firstName').optional({ values: 'falsy' }).isString().trim().notEmpty(),
+  body('lastName').optional({ values: 'falsy' }).isString().trim().notEmpty(),
+  body('dateOfBirth').optional({ values: 'falsy' }).isISO8601().withMessage('dateOfBirth must be a valid date'),
+  body('gender').optional({ values: 'falsy' }).isIn(['Male', 'Female', 'Non-binary', 'Prefer not to say']),
+  // Empty string from the wizard must not fail enum checks (blood group is optional).
+  body('bloodGroup').optional({ values: 'falsy' }).isIn(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']),
+  body('maritalStatus').optional({ values: 'falsy' }).isIn(['Single', 'Married', 'Divorced', 'Widowed'])
 ];
 
 export const familyRules = [

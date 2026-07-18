@@ -161,6 +161,8 @@ export const listMyPayslips = asyncHandler(async (req, res) => {
 /**
  * GET /api/payslips/:id/pdf — US 7.3, authorized PDF stream.
  * Employees may only download their own slips; admin/HR may download any.
+ * Re-renders the PDF with the current company letter template + watermark so
+ * downloads always match the latest Company Settings branding.
  */
 export const downloadPayslipPdf = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid payslip id');
@@ -170,6 +172,15 @@ export const downloadPayslipPdf = asyncHandler(async (req, res) => {
   const isOwner = slip.employeeId.equals(req.user._id);
   const isManager = ['admin', 'hr'].includes(req.user.role);
   if (!isOwner && !isManager) throw new ApiError(403, 'Not authorized to access this payslip');
+
+  const company = await Company.findById(req.user.companyId || slip.companyId);
+  try {
+    const pdfUrl = await generatePayslipPdf(slip.toObject ? slip.toObject() : slip, company);
+    slip.pdfUrl = pdfUrl;
+    await slip.save();
+  } catch (err) {
+    console.warn('[payslip] re-render with company template failed:', err.message);
+  }
 
   const abs = path.resolve(process.cwd(), slip.pdfUrl);
   if (!fs.existsSync(abs)) throw new ApiError(404, 'Payslip file is missing on disk');

@@ -6,8 +6,8 @@ export const createOffer = (body) => api.post('/offers', body).then((r) => r.dat
 export const sendOfferEmail = (id, body) => api.post(`/offers/${id}/send`, body).then((r) => r.data);
 export const updateOfferStatus = (id, status) => api.patch(`/offers/${id}/status`, { status }).then((r) => r.data.offer);
 export const approveOffer = (id) => api.post(`/offers/${id}/approve`).then((r) => r.data);
-export const generateAppointmentLetter = (id) =>
-  api.post(`/offers/${id}/appointment-letter`).then((r) => r.data);
+export const generateAppointmentLetter = (id, body = {}) =>
+  api.post(`/offers/${id}/appointment-letter`, body).then((r) => r.data);
 export const resendOffer = (id) => api.post(`/offers/${id}/resend`).then((r) => r.data);
 export const regenerateOffer = (id) => api.post(`/offers/${id}/regenerate`).then((r) => r.data);
 export const deleteOffer = (id) => api.delete(`/offers/${id}`).then((r) => r.data);

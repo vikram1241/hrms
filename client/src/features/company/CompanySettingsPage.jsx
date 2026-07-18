@@ -5,7 +5,10 @@ import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import IconButton from '@mui/material/IconButton';
-import { Building2, Upload, Stamp, PenTool, Mail, Eye, X, UserRound, FileText, Image } from 'lucide-react';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Radio from '@mui/material/Radio';
+import Checkbox from '@mui/material/Checkbox';
+import { Building2, Upload, Stamp, PenTool, Mail, Eye, X, UserRound, FileText, Image, Plus, Trash2 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -14,18 +17,45 @@ import useAsync from '../../hooks/useAsync.js';
 import { getCompany, updateCompany, uploadCompanyAsset, companyAssetUrl } from '../../api/company.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
-const emptyMail = {
+const emptyMailAccount = () => ({
+  _id: `new-${Date.now()}`,
+  label: 'SMTP account',
   smtpHost: 'smtp.gmail.com',
   smtpPort: 465,
   smtpUser: '',
   mailFrom: '',
   smtpPass: '',
-  smtpPassSet: false
-};
+  smtpPassSet: false,
+  isDefault: false,
+  active: true
+});
 
 const emptyHr = { name: '', designation: '', contact: '', email: '' };
 
 const isPdfUrl = (url) => /\.pdf$/i.test(url || '');
+
+const normalizeMailAccounts = (company) => {
+  const list = Array.isArray(company.mailAccounts) && company.mailAccounts.length
+    ? company.mailAccounts
+    : (company.mail?.smtpUser || company.mail?.smtpPassSet
+      ? [{
+        _id: 'legacy',
+        label: 'Primary',
+        ...company.mail,
+        isDefault: true,
+        active: true
+      }]
+      : [emptyMailAccount()]);
+  const accounts = list.map((a, i) => ({
+    ...emptyMailAccount(),
+    ...a,
+    _id: a._id || `acct-${i}`,
+    smtpPass: '',
+    smtpPassSet: Boolean(a.smtpPassSet)
+  }));
+  if (!accounts.some((a) => a.isDefault)) accounts[0].isDefault = true;
+  return accounts;
+};
 
 export default function CompanySettingsPage() {
   const dispatch = useDispatch();
@@ -43,11 +73,7 @@ export default function CompanySettingsPage() {
         hr: { ...emptyHr, ...(company.hr || {}) },
         statutory: { ...company.statutory },
         address: { ...company.address },
-        mail: {
-          ...emptyMail,
-          ...(company.mail || {}),
-          smtpPass: ''
-        }
+        mailAccounts: normalizeMailAccounts(company)
       });
     }
   }, [company]);
@@ -63,14 +89,41 @@ export default function CompanySettingsPage() {
     return next;
   });
 
+  const setAccount = (idx, key, value) => setForm((f) => {
+    const next = structuredClone(f);
+    next.mailAccounts[idx][key] = value;
+    if (key === 'isDefault' && value) {
+      next.mailAccounts.forEach((a, i) => { a.isDefault = i === idx; });
+    }
+    return next;
+  });
+
+  const addAccount = () => setForm((f) => ({
+    ...f,
+    mailAccounts: [...f.mailAccounts, { ...emptyMailAccount(), isDefault: f.mailAccounts.length === 0 }]
+  }));
+
+  const removeAccount = (idx) => setForm((f) => {
+    const mailAccounts = f.mailAccounts.filter((_, i) => i !== idx);
+    if (mailAccounts.length && !mailAccounts.some((a) => a.isDefault)) {
+      const activeIdx = mailAccounts.findIndex((a) => a.active !== false);
+      mailAccounts[Math.max(activeIdx, 0)].isDefault = true;
+    }
+    return { ...f, mailAccounts };
+  });
+
   const save = async () => {
     setSaving(true);
     try {
       const payload = structuredClone(form);
-      if (!payload.mail?.smtpPass?.trim()) {
-        if (payload.mail) delete payload.mail.smtpPass;
-      }
-      delete payload.mail?.smtpPassSet;
+      payload.mailAccounts = (payload.mailAccounts || []).map((a) => {
+        const row = { ...a };
+        if (!row.smtpPass?.trim()) delete row.smtpPass;
+        delete row.smtpPassSet;
+        if (String(row._id).startsWith('new-') || row._id === 'legacy') delete row._id;
+        return row;
+      });
+      delete payload.mail;
       await updateCompany(payload);
       dispatch(notifySuccess('Company configuration saved.'));
       reload();
@@ -171,29 +224,79 @@ export default function CompanySettingsPage() {
         </CardBody></Card>
 
         <Card className="lg:col-span-2"><CardBody>
-          <h3 className="mb-1 flex items-center gap-2 text-base font-semibold text-ink">
-            <Mail size={18} className="text-primary-600" /> Outbound email (SMTP)
-          </h3>
-          <p className="mb-3 text-xs text-muted">
-            Used for offer letters, credentials and payslip notices. Saved on this company and read from the database on every send.
-            {form.mail.smtpPassSet
-              ? ' A password is already stored — leave the password field blank to keep it.'
-              : ' No password stored yet — enter SMTP credentials to enable delivery.'}
-          </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {field('SMTP host', 'mail.smtpHost', { placeholder: 'smtp.gmail.com' })}
-            {field('SMTP port', 'mail.smtpPort', { type: 'number' })}
-            {field('SMTP username', 'mail.smtpUser', { autoComplete: 'off' })}
-            {field('SMTP password', 'mail.smtpPass', {
-              type: 'password',
-              autoComplete: 'new-password',
-              placeholder: form.mail.smtpPassSet ? '•••••••• (unchanged)' : 'App password / SMTP secret'
-            })}
-            <div className="sm:col-span-2 lg:col-span-3">
-              {field('From address', 'mail.mailFrom', {
-                placeholder: 'e.g. Mirus Med Sciences <hr@mirus.com>'
-              })}
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="mb-1 flex items-center gap-2 text-base font-semibold text-ink">
+                <Mail size={18} className="text-primary-600" /> Outbound email (SMTP)
+              </h3>
+              <p className="text-xs text-muted">
+                Add multiple SMTP accounts for offer letters, credentials and payslip notices.
+                Mark one as <strong>Default</strong> — that account is used for all outbound mail.
+                Leave password blank to keep an existing secret.
+              </p>
             </div>
+            <Button variant="secondary" type="button" onClick={addAccount}>
+              <Plus size={16} /> Add account
+            </Button>
+          </div>
+
+          <div className="space-y-4">
+            {(form.mailAccounts || []).map((acct, idx) => (
+              <div key={acct._id || idx} className="rounded-lg border border-line p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <FormControlLabel
+                      control={(
+                        <Radio
+                          size="small"
+                          checked={Boolean(acct.isDefault)}
+                          onChange={() => setAccount(idx, 'isDefault', true)}
+                          disabled={acct.active === false}
+                        />
+                      )}
+                      label={<span className="text-sm font-medium text-ink">Default mail</span>}
+                    />
+                    <FormControlLabel
+                      control={(
+                        <Checkbox
+                          size="small"
+                          checked={acct.active !== false}
+                          onChange={(e) => setAccount(idx, 'active', e.target.checked)}
+                        />
+                      )}
+                      label={<span className="text-sm text-muted">Active</span>}
+                    />
+                  </div>
+                  {form.mailAccounts.length > 1 && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-danger hover:underline"
+                      onClick={() => removeAccount(idx)}
+                    >
+                      <Trash2 size={14} /> Remove
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <TextField size="small" fullWidth label="Account label" value={acct.label || ''}
+                    onChange={(e) => setAccount(idx, 'label', e.target.value)} placeholder="e.g. HR, Payroll" />
+                  <TextField size="small" fullWidth label="SMTP host" value={acct.smtpHost || ''}
+                    onChange={(e) => setAccount(idx, 'smtpHost', e.target.value)} placeholder="smtp.gmail.com" />
+                  <TextField size="small" fullWidth label="SMTP port" type="number" value={acct.smtpPort ?? 465}
+                    onChange={(e) => setAccount(idx, 'smtpPort', e.target.value)} />
+                  <TextField size="small" fullWidth label="SMTP username" autoComplete="off" value={acct.smtpUser || ''}
+                    onChange={(e) => setAccount(idx, 'smtpUser', e.target.value)} />
+                  <TextField size="small" fullWidth label="SMTP password" type="password" autoComplete="new-password"
+                    value={acct.smtpPass || ''}
+                    onChange={(e) => setAccount(idx, 'smtpPass', e.target.value)}
+                    placeholder={acct.smtpPassSet ? '•••••••• (unchanged)' : 'App password / SMTP secret'} />
+                  <TextField size="small" fullWidth label="From address" value={acct.mailFrom || ''}
+                    onChange={(e) => setAccount(idx, 'mailFrom', e.target.value)}
+                    placeholder="e.g. Mirus Med Sciences <hr@mirus.com>"
+                    className="sm:col-span-2 lg:col-span-3" />
+                </div>
+              </div>
+            ))}
           </div>
         </CardBody></Card>
 

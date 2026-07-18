@@ -13,11 +13,14 @@ api.interceptors.response.use(
   (res) => res,
   (error) => {
     const status = error.response?.status;
+    const details = error.response?.data?.details;
+    const detailMsg = Array.isArray(details) && details.length
+      ? details.map((d) => d.message).filter(Boolean).join('; ')
+      : '';
     let message =
-      error.response?.data?.message ||
-      error.response?.data?.details?.[0]?.message ||
-      error.message ||
-      'Something went wrong';
+      (error.response?.data?.message === 'Validation failed' && detailMsg)
+        ? detailMsg
+        : (error.response?.data?.message || detailMsg || error.message || 'Something went wrong');
     if (status === 413) {
       message = 'File is too large for the server. Check the allowed size and try again.';
     }

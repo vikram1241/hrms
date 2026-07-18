@@ -101,7 +101,8 @@ export default function OffersPage() {
         await regenerateOffer(offer._id);
         dispatch(notifySuccess('Offer PDF regenerated. You can resend when ready.'));
       } else if (type === 'appointment') {
-        const res = await generateAppointmentLetter(offer._id);
+        const location = String(offer.location || '').trim();
+        const res = await generateAppointmentLetter(offer._id, location ? { location } : {});
         dispatch(notifySuccess(res.message || 'Appointment letter generated and emailed.'));
       }
       setConfirm(null);

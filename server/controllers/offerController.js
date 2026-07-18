@@ -15,6 +15,7 @@ import { generateOfferLetterPdf } from '../services/pdfService.js';
 import { upsertCandidateUser } from '../services/candidateService.js';
 import { provisionEmployee } from '../services/provisioningService.js';
 import { sendOfferInvite } from '../services/emailService.js';
+import { queueMailJob } from '../services/mailQueue.js';
 import { issueAndEmailAppointmentLetter } from '../services/appointmentLetterService.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 import Company from '../models/Company.js';
@@ -182,17 +183,19 @@ const createOfferCore = async (payload, { sendEmail = true } = {}) => {
     accessTokenExpires: new Date(Date.now() + ACCESS_TOKEN_TTL_MS)
   });
 
+  let email = null;
   if (sendEmail) {
-    await deliverOfferEmail({
+    // Do not block the HTTP response on SMTP + large PDF upload.
+    email = await queueMailJob(() => deliverOfferEmail({
       offer,
       fullName,
       offerUrl,
       subject: emailPreview.subject,
       body: emailPreview.body
-    });
+    }));
   }
 
-  return { offer, accessToken: raw, offerUrl, emailPreview };
+  return { offer, accessToken: raw, offerUrl, emailPreview, email };
 };
 
 /**
@@ -202,7 +205,7 @@ const createOfferCore = async (payload, { sendEmail = true } = {}) => {
  */
 export const createOffer = asyncHandler(async (req, res) => {
   const sendEmail = !(req.body.sendEmail === false || req.body.sendEmail === 'false');
-  const { offer, accessToken, offerUrl, emailPreview } = await createOfferCore(req.body, { sendEmail });
+  const { offer, accessToken, offerUrl, emailPreview, email } = await createOfferCore(req.body, { sendEmail });
   await logActivity({
     actor: req.user,
     action: sendEmail ? 'offer.send' : 'offer.create',
@@ -214,8 +217,11 @@ export const createOffer = asyncHandler(async (req, res) => {
   });
   res.status(201).json({
     success: true,
-    message: sendEmail ? 'Offer staged and sent' : 'Offer generated — review email before sending',
+    message: sendEmail
+      ? (email?.queued ? 'Offer staged — email queued for delivery' : 'Offer staged and sent')
+      : 'Offer generated — review email before sending',
     offer,
+    email,
     emailPreview,
     // Always return offerUrl for the preview step (HR sees the signing link in the draft).
     offerUrl,
@@ -268,7 +274,7 @@ export const sendOfferEmail = asyncHandler(async (req, res) => {
     body = rendered.body;
   }
 
-  await deliverOfferEmail({
+  const email = await queueMailJob(() => deliverOfferEmail({
     offer,
     fullName: offer.fullName,
     offerUrl,
@@ -277,15 +283,16 @@ export const sendOfferEmail = asyncHandler(async (req, res) => {
     annualCTCPaisa: assignment?.annualCTC,
     company,
     letterTpl
-  });
+  }));
 
   if (offer.status === 'pending') offer.status = 'sent';
   await offer.save();
 
   res.status(200).json({
     success: true,
-    message: 'Offer email sent',
+    message: email?.queued ? 'Offer email queued for delivery' : 'Offer email sent',
     offer,
+    email,
     emailPreview: { subject, body },
     ...(exposeToken() ? { accessToken, offerUrl } : {})
   });
@@ -513,6 +520,11 @@ export const generateAppointmentLetter = asyncHandler(async (req, res) => {
   }
   if (!user) throw new ApiError(404, 'Employee account not found for this offer');
 
+  // Reporting area: explicit body → offer Job Location → employee workLocation → omit line.
+  const reportingArea = String(
+    req.body?.location || req.body?.reportingArea || offer.location || user.employeeDetails?.workLocation || ''
+  ).trim();
+
   const result = await issueAndEmailAppointmentLetter({
     user,
     issuedBy: req.user,
@@ -520,7 +532,9 @@ export const generateAppointmentLetter = asyncHandler(async (req, res) => {
     effectiveDate: offer.joiningDate || user.employeeDetails?.dateOfJoining || new Date(),
     department: offer.department || user.employeeDetails?.department,
     companyId: offer.companyId,
-    annualCTCPaisa: offer.salaryAssignmentId?.annualCTC
+    annualCTCPaisa: offer.salaryAssignmentId?.annualCTC,
+    location: reportingArea,
+    queueEmail: true
   });
 
   await logActivity({
@@ -531,9 +545,11 @@ export const generateAppointmentLetter = asyncHandler(async (req, res) => {
     message: `Appointment letter issued to ${offer.fullName} (${offer.candidateEmail})`
   });
 
-  const mailed = result.email?.delivered
-    ? ` and emailed to ${offer.candidateEmail}`
-    : ` (email ${result.email?.mode || 'stub'} — check SMTP if not delivered)`;
+  const mailed = result.email?.queued
+    ? ` — email queued to ${offer.candidateEmail}`
+    : result.email?.delivered
+      ? ` and emailed to ${offer.candidateEmail}`
+      : ` (email ${result.email?.mode || 'stub'} — check SMTP if not delivered)`;
 
   res.status(201).json({
     success: true,
@@ -688,17 +704,18 @@ export const resendOffer = asyncHandler(async (req, res) => {
     offerUrl
   }));
 
-  await deliverOfferEmail({
+  const email = await queueMailJob(() => deliverOfferEmail({
     offer,
     fullName: offer.fullName,
     offerUrl,
     subject: emailPreview.subject,
     body: emailPreview.body
-  });
+  }));
 
   res.status(200).json({
     success: true,
-    message: 'Offer reminder sent',
+    message: email?.queued ? 'Offer reminder queued for delivery' : 'Offer reminder sent',
+    email,
     emailPreview,
     ...(exposeToken() ? { accessToken: raw, offerUrl } : {})
   });

@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { formatINR } from '../utils/money.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import ApiError from '../utils/ApiError.js';
+import { downscaleForPdfEmbed } from './brandingOptimize.js';
 
 const ROOT = process.cwd();
 export const PAYSLIP_DIR = path.resolve(ROOT, 'uploads', 'payslips');
@@ -25,6 +26,22 @@ const ascii = (s) => String(s ?? '').replace(/[^\x20-\xFF]/g, '');
 
 const relPath = (absPath) => path.relative(ROOT, absPath).split(path.sep).join('/');
 
+/** In-memory cache of branding file bytes (keyed by abs path + mtime). */
+const assetBytesCache = new Map();
+
+/** Clear branding byte cache (call after company asset upload). */
+export const clearBrandingAssetCache = (relMaybe = null) => {
+  if (!relMaybe) {
+    assetBytesCache.clear();
+    return;
+  }
+  const abs = resolveAssetPath(relMaybe);
+  if (!abs) return;
+  for (const key of assetBytesCache.keys()) {
+    if (key.startsWith(`${abs}|`)) assetBytesCache.delete(key);
+  }
+};
+
 const resolveAssetPath = (relMaybe) => {
   if (!relMaybe) return null;
   const candidates = [
@@ -38,16 +55,29 @@ const resolveAssetPath = (relMaybe) => {
   return null;
 };
 
+const readAssetBytesCached = async (abs) => {
+  const st = await fsp.stat(abs);
+  const key = `${abs}|${st.mtimeMs}|${st.size}`;
+  const hit = assetBytesCache.get(key);
+  if (hit) return hit;
+  const bytes = await fsp.readFile(abs);
+  assetBytesCache.set(key, bytes);
+  // Bound memory: drop oldest entries when cache grows.
+  if (assetBytesCache.size > 48) {
+    const first = assetBytesCache.keys().next().value;
+    assetBytesCache.delete(first);
+  }
+  return bytes;
+};
+
 const loadImage = async (doc, relMaybe) => {
   const abs = resolveAssetPath(relMaybe);
   if (!abs) return null;
   try {
-    const bytes = await fsp.readFile(abs);
-    const lower = abs.toLowerCase();
-    if (lower.endsWith('.png')) return await doc.embedPng(bytes);
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return await doc.embedJpg(bytes);
-    // Non-image path (e.g. PDF letterhead) — skip; caller may use loadOutlinePage.
-    return null;
+    const raw = await readAssetBytesCached(abs);
+    const { bytes, format } = await downscaleForPdfEmbed(abs, raw);
+    if (format === 'png') return await doc.embedPng(bytes);
+    return await doc.embedJpg(bytes);
   } catch {
     return null;
   }
@@ -63,7 +93,7 @@ const loadOutlinePage = async (doc, relMaybe) => {
   const lower = abs.toLowerCase();
   try {
     if (lower.endsWith('.pdf')) {
-      const bytes = await fsp.readFile(abs);
+      const bytes = await readAssetBytesCached(abs);
       const [embedded] = await doc.embedPdf(bytes, [0]);
       return { kind: 'pdf', embedded };
     }
@@ -84,8 +114,10 @@ export const PAGE_MARGIN_X = 48;
  * Shared company page chrome for all generated PDFs.
  * Prefer Company Settings → letter outline/template as the full-page background;
  * otherwise draw logo/letterhead + watermark + address footer.
+ * @param {{ font?, bold?, alwaysWatermark?: boolean }} opts
+ *   alwaysWatermark — also draw logo watermark when an outline is set (payslips).
  */
-const createCompanyPageKit = async (doc, company, { font, bold } = {}) => {
+const createCompanyPageKit = async (doc, company, { font, bold, alwaysWatermark = false } = {}) => {
   const bodyFont = font || await doc.embedFont(StandardFonts.Helvetica);
   const boldFont = bold || await doc.embedFont(StandardFonts.HelveticaBold);
   const brand = rgb(0.12, 0.22, 0.45);
@@ -106,9 +138,20 @@ const createCompanyPageKit = async (doc, company, { font, bold } = {}) => {
     company?.hr?.email || null
   ].filter(Boolean).join('; ');
 
+  // Lazy-load: with an outline, skip letterhead (not drawn). Only load logo when watermark needed.
   const outline = await loadOutlinePage(doc, company?.branding?.letterOutlineUrl);
-  const logo = await loadImage(doc, company?.branding?.logoUrl);
-  const letterheadImg = await loadImage(doc, company?.branding?.letterheadUrl);
+  let logo = null;
+  let letterheadImg = null;
+  if (outline) {
+    if (alwaysWatermark) {
+      logo = await loadImage(doc, company?.branding?.logoUrl);
+    }
+  } else {
+    [logo, letterheadImg] = await Promise.all([
+      loadImage(doc, company?.branding?.logoUrl),
+      loadImage(doc, company?.branding?.letterheadUrl)
+    ]);
+  }
 
   const contentTopY = outline ? 722 : 730;
   const contentBottomY = outline ? 78 : 68;
@@ -125,14 +168,15 @@ const createCompanyPageKit = async (doc, company, { font, bold } = {}) => {
   };
 
   const drawWatermark = (p) => {
-    if (outline || !logo) return;
+    if (!logo) return;
+    if (outline && !alwaysWatermark) return;
     const d = logo.scaleToFit(360, 360);
     p.drawImage(logo, {
       x: (PAGE_W - d.width) / 2,
       y: (PAGE_H - d.height) / 2 - 20,
       width: d.width,
       height: d.height,
-      opacity: 0.12
+      opacity: outline ? 0.08 : 0.12
     });
   };
 
@@ -177,6 +221,7 @@ const createCompanyPageKit = async (doc, company, { font, bold } = {}) => {
   const decoratePage = (p) => {
     if (outline) {
       drawOutline(p);
+      if (alwaysWatermark) drawWatermark(p);
       return contentTopY;
     }
     drawWatermark(p);
@@ -272,6 +317,30 @@ const formatOfferDate = (d) => {
   return `${dt.getDate()} ${MONTHS[dt.getMonth() + 1]} ${dt.getFullYear()}`;
 };
 
+/** Harish-style date: "9th July 2026" (ordinal day). */
+const formatAppointmentDate = (d) => {
+  if (d == null || d === '') return '';
+  // Already a display string (avoid re-parsing "9 July 2026" as UTC midnight).
+  if (typeof d === 'string' && /[a-zA-Z]/.test(d) && !/^\d{4}-\d{2}-\d{2}/.test(d)) {
+    const m = String(d).match(/^(\d{1,2})(st|nd|rd|th)?\s+/i);
+    if (m && !m[2]) {
+      const n = Number(m[1]);
+      const ord = (n % 10 === 1 && n % 100 !== 11) ? 'st'
+        : (n % 10 === 2 && n % 100 !== 12) ? 'nd'
+          : (n % 10 === 3 && n % 100 !== 13) ? 'rd' : 'th';
+      return String(d).replace(/^(\d{1,2})/, `$1${ord}`);
+    }
+    return String(d);
+  }
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d || '');
+  const n = dt.getDate();
+  const ord = (n % 10 === 1 && n % 100 !== 11) ? 'st'
+    : (n % 10 === 2 && n % 100 !== 12) ? 'nd'
+      : (n % 10 === 3 && n % 100 !== 13) ? 'rd' : 'th';
+  return `${n}${ord} ${MONTHS[dt.getMonth() + 1]} ${dt.getFullYear()}`;
+};
+
 const firstNameOf = (fullName) => {
   const parts = String(fullName || '').trim().split(/\s+/);
   // Drop honorifics like Mr./Ms.
@@ -289,11 +358,17 @@ export const generatePayslipPdf = async (slip, company = null) => {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const kit = await createCompanyPageKit(doc, company, { font, bold });
+  // Always apply company letter template/outline + logo watermark on payslips.
+  const kit = await createCompanyPageKit(doc, company, { font, bold, alwaysWatermark: true });
   const ink = rgb(0.1, 0.1, 0.1);
   let { page, y } = kit.addDecoratedPage();
 
-  const text = (s, x, opts = {}) =>
+  const ensure = (need = 40) => {
+    if (y < kit.contentBottomY + need) ({ page, y } = kit.addDecoratedPage());
+  };
+
+  const text = (s, x, opts = {}) => {
+    ensure((opts.size ?? 10) + 8);
     page.drawText(ascii(s), {
       x,
       y: opts.y ?? y,
@@ -301,6 +376,7 @@ export const generatePayslipPdf = async (slip, company = null) => {
       font: opts.bold ? bold : font,
       color: ink
     });
+  };
 
   text(`Payslip for ${MONTHS[slip.month]} ${slip.year}`, kit.MARGIN_X, { size: 13, bold: true });
   y -= 20;
@@ -312,10 +388,10 @@ export const generatePayslipPdf = async (slip, company = null) => {
   });
   y -= 16;
 
-  const meta = slip.metaSnapshot;
+  const meta = slip.metaSnapshot || {};
   [
-    [`Employee: ${meta.fullName} (${meta.employeeDisplayId})`, `Department: ${meta.department}`],
-    [`Designation: ${meta.designation}`, `PAN: ${meta.pan || '-'}`],
+    [`Employee: ${meta.fullName || '-'} (${meta.employeeDisplayId || '-'})`, `Department: ${meta.department || '-'}`],
+    [`Designation: ${meta.designation || '-'}`, `PAN: ${meta.pan || '-'}`],
     [`UAN: ${meta.uan || '-'}`, `Bank A/C: ${meta.bankAccountHidden || '-'}`]
   ].forEach((row) => {
     text(row[0], kit.MARGIN_X);
@@ -324,40 +400,46 @@ export const generatePayslipPdf = async (slip, company = null) => {
   });
 
   y -= 10;
+  ensure(80);
   text('Earnings', kit.MARGIN_X, { bold: true });
   text('Deductions', 320, { bold: true });
   y -= 16;
   const startY = y;
-  slip.earningsLedger.forEach((e) => {
+  const earnings = slip.earningsLedger || [];
+  const deductions = slip.deductionsLedger || [];
+  earnings.forEach((e) => {
     text(e.label, kit.MARGIN_X);
     text(formatINR(e.amount), 230);
     y -= 15;
   });
   const earningsEndY = y;
   y = startY;
-  slip.deductionsLedger.forEach((d) => {
+  deductions.forEach((d) => {
     text(d.label, 320);
     text(formatINR(d.amount), 500);
     y -= 15;
   });
   y = Math.min(earningsEndY, y) - 12;
 
+  ensure(80);
   page.drawLine({
     start: { x: kit.MARGIN_X, y: y + 6 },
     end: { x: PAGE_W - kit.MARGIN_X, y: y + 6 },
     thickness: 0.5,
     color: ink
   });
-  text(`Gross Earnings: ${formatINR(slip.financialSummary.grossEarnings)}`, kit.MARGIN_X, { bold: true });
-  text(`Total Deductions: ${formatINR(slip.financialSummary.totalDeductions)}`, 320, { bold: true });
+  const summary = slip.financialSummary || {};
+  text(`Gross Earnings: ${formatINR(summary.grossEarnings || 0)}`, kit.MARGIN_X, { bold: true });
+  text(`Total Deductions: ${formatINR(summary.totalDeductions || 0)}`, 320, { bold: true });
   y -= 22;
-  text(`Net Pay: ${formatINR(slip.financialSummary.netPay)}`, kit.MARGIN_X, { size: 12, bold: true });
+  text(`Net Pay: ${formatINR(summary.netPay || 0)}`, kit.MARGIN_X, { size: 12, bold: true });
   y -= 16;
-  text(`(${slip.financialSummary.netPayInWords})`, kit.MARGIN_X, { size: 9 });
+  text(`(${summary.netPayInWords || '-'})`, kit.MARGIN_X, { size: 9 });
   y -= 30;
   text('This is a system-generated payslip and does not require a signature.', kit.MARGIN_X, { size: 8 });
 
-  const file = path.join(PAYSLIP_DIR, `payslip-${slip.employeeId}-${slip.year}-${String(slip.month).padStart(2, '0')}.pdf`);
+  const empKey = slip.employeeId?._id || slip.employeeId || 'emp';
+  const file = path.join(PAYSLIP_DIR, `payslip-${empKey}-${slip.year}-${String(slip.month).padStart(2, '0')}.pdf`);
   await fsp.writeFile(file, await doc.save());
   return relPath(file);
 };
@@ -400,7 +482,12 @@ export const generateOfferLetterPdf = async ({
   const headerBg = rgb(0.86, 0.92, 0.97);
 
   const addr = company?.address || {};
-  const jobLocation = location || [addr.city, addr.state].filter(Boolean).join(', ') || 'Hyderabad, Telangana';
+  // "based at …" is the organisation/company base — never the candidate Job Location.
+  const companyLocation = [addr.city, addr.state].filter(Boolean).join(', ')
+    || String(addr.line1 || addr.street || '').trim()
+    || 'Hyderabad, Telangana';
+  // Candidate posting location (Create Offer → Job Location); used in Key Terms only.
+  const jobLocation = String(location || '').trim() || companyLocation;
   const offerDt = offerDate || new Date();
   const joinDt = joiningDate || offerDt;
   const acceptDt = acceptByDate || joinDt;
@@ -411,9 +498,11 @@ export const generateOfferLetterPdf = async ({
   const ctcStr = formatINR(annualCTC);
   const ctcWords = paisaToWords(annualCTC);
 
-  const logoWithStamp = await loadImage(doc, company?.branding?.logoWithStampUrl);
-  const stamp = await loadImage(doc, company?.branding?.stampUrl);
-  const sigImg = await loadImage(doc, company?.branding?.signatureUrl);
+  const [logoWithStamp, stamp, sigImg] = await Promise.all([
+    loadImage(doc, company?.branding?.logoWithStampUrl),
+    loadImage(doc, company?.branding?.stampUrl),
+    loadImage(doc, company?.branding?.signatureUrl)
+  ]);
 
   const hrName = (company?.hr?.name || '').trim();
   const hrTitle = (company?.hr?.designation || '').trim();
@@ -527,7 +616,7 @@ export const generateOfferLetterPdf = async ({
   ], { size: 11, gap: 18 });
 
   const defaultParas = [
-    `We are pleased to extend this Offer of Employment for the position of ${boldMark(position)} in our organization, based at ${boldMark(jobLocation)}.`,
+    `We are pleased to extend this Offer of Employment for the position of ${boldMark(position)} in our organization, based at ${boldMark(companyLocation)}.`,
     `We were impressed with your profile, experience, and the interview discussions. We believe your skills and enthusiasm will be a valuable addition to our ${boldMark(department || 'team')}. As a ${boldMark(position)}, you will play a key role in delivering business outcomes and contributing to the achievement of targets in your assigned territory. This position offers good growth opportunities within the organization for high performers.`
   ];
   const paras = Array.isArray(bodyParagraphs) && bodyParagraphs.length
@@ -539,7 +628,12 @@ export const generateOfferLetterPdf = async ({
       .replace(/\{\{joiningDate\}\}/g, boldMark(joinDateStr))
       .replace(/\{\{offerDate\}\}/g, boldMark(offerDateStr))
       .replace(/\{\{ctc\}\}/g, boldMark(ctcStr))
-      .replace(/\{\{location\}\}/g, boldMark(jobLocation)))
+      // Organisation base (must not use candidate Job Location).
+      .replace(/\{\{companyLocation\}\}/gi, boldMark(companyLocation))
+      .replace(/\{\{Job Location\}\}/gi, boldMark(companyLocation))
+      .replace(/\{\{location\}\}/gi, boldMark(companyLocation))
+      // Explicit employee posting location if a template uses it in body copy.
+      .replace(/\{\{jobLocation\}\}/g, boldMark(jobLocation)))
     : defaultParas;
 
   for (const para of paras) {
@@ -919,6 +1013,215 @@ export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { nam
 // --- Epic 10: company-sealed statutory document generation ---
 
 /**
+ * Appointment letter PDF — locked to Harish reference layout.
+ * Never uses generateCompanyDocPdf / HR block / mid-page seal.
+ *
+ * Sections: date (right) → recipient → centered APPOINTMENT LETTER → body
+ * → large gap → signature (optional) + Director (left) + stamp (optional, bottom-right).
+ *
+ * @returns {Promise<string>} repo-relative path to the written file.
+ */
+export const generateAppointmentLetterPdf = async ({
+  company,
+  employeeName,
+  firstName,
+  designation,
+  joiningDate,
+  letterDate,
+  location,
+  addressLines = [],
+  phone = '',
+  trainingVenue = '',
+  joiningTime = '10:00 AM',
+  honorific = ''
+} = {}) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  // Outline already carries letterhead; skip extra watermark decode when outline is set.
+  const kit = await createCompanyPageKit(doc, company, { font, bold, alwaysWatermark: false });
+  const ink = rgb(0.12, 0.12, 0.14);
+  const { MARGIN_X, CONTENT_WIDTH, contentBottomY } = kit;
+  let { page, y } = kit.addDecoratedPage();
+
+  const write = (s, opts = {}) => {
+    const size = opts.size ?? 10;
+    const f = opts.bold ? bold : font;
+    const x = opts.x ?? MARGIN_X;
+    const maxChars = opts.maxChars ?? 88;
+    const gap = opts.gap ?? (size + 4);
+    for (const ln of wrapText(s, maxChars)) {
+      page.drawText(ascii(ln), { x, y, size, font: f, color: opts.color || ink });
+      y -= gap;
+    }
+  };
+  const writeRich = (segmentsOrMarked, opts = {}) => {
+    const size = opts.size ?? 10;
+    const x = opts.x ?? MARGIN_X;
+    const maxWidth = opts.maxWidth ?? CONTENT_WIDTH;
+    const gap = opts.gap ?? (size + 4);
+    const segments = typeof segmentsOrMarked === 'string'
+      ? parseBoldMarks(segmentsOrMarked)
+      : segmentsOrMarked;
+    const lines = wrapRichSegments(segments, maxWidth, size, font, bold);
+    for (const line of lines) {
+      let cx = x;
+      for (const seg of line) {
+        const f = seg.bold ? bold : font;
+        const t = ascii(seg.text);
+        if (!t) continue;
+        page.drawText(t, { x: cx, y, size, font: f, color: ink });
+        cx += f.widthOfTextAtSize(t, size);
+      }
+      y -= gap;
+    }
+  };
+
+  const dateStr = formatAppointmentDate(letterDate || joiningDate || new Date());
+  const joinStr = formatAppointmentDate(joiningDate || letterDate || new Date());
+  const whoRaw = String(employeeName || 'Employee').trim();
+  const who = honorific && !/^(mr|mrs|ms|miss|dr)\.? /i.test(whoRaw)
+    ? `${honorific} ${whoRaw}`.trim()
+    : whoRaw;
+  const first = firstName || firstNameOf(whoRaw);
+  const role = String(designation || 'Employee').trim();
+  const reportLoc = String(location || '').trim();
+  const venue = String(trainingVenue || 'Vivanta, Begumpet, Hyderabad').trim();
+  const timeStr = String(joiningTime || '10:00 AM').trim();
+
+  // --- Date (right) ---
+  {
+    const label = 'Date: ';
+    const value = dateStr;
+    const size = 10;
+    const totalW = font.widthOfTextAtSize(label, size) + bold.widthOfTextAtSize(ascii(value), size);
+    const x0 = PAGE_W - MARGIN_X - totalW;
+    page.drawText(label, { x: x0, y, size, font, color: ink });
+    page.drawText(ascii(value), {
+      x: x0 + font.widthOfTextAtSize(label, size),
+      y,
+      size,
+      font: bold,
+      color: ink
+    });
+    y -= 26;
+  }
+
+  // --- Recipient block (left) ---
+  write(who, { bold: true, size: 10, gap: 13 });
+  for (const ln of (addressLines || []).map((l) => String(l || '').trim()).filter(Boolean)) {
+    write(ln, { size: 10, gap: 12 });
+  }
+  if (phone) {
+    writeRich([
+      { text: 'Mobile: ', bold: false },
+      { text: String(phone), bold: true }
+    ], { size: 10, gap: 12 });
+  }
+  y -= 18;
+
+  // --- Centered underlined title ---
+  {
+    const title = 'APPOINTMENT LETTER';
+    const size = 13;
+    const tw = bold.widthOfTextAtSize(title, size);
+    const tx = (PAGE_W - tw) / 2;
+    page.drawText(title, { x: tx, y, size, font: bold, color: ink });
+    page.drawLine({
+      start: { x: tx, y: y - 3 },
+      end: { x: tx + tw, y: y - 3 },
+      thickness: 1.15,
+      color: ink
+    });
+    y -= 30;
+  }
+
+  // --- Harish body (locked copy; dynamic values only) ---
+  writeRich([
+    { text: 'Dear ', bold: false },
+    { text: first, bold: true },
+    { text: ',', bold: false }
+  ], { size: 10, gap: 18 });
+
+  writeRich([
+    { text: 'We are pleased to confirm your appointment as ', bold: false },
+    { text: role, bold: true },
+    { text: ' with effect from ', bold: false },
+    { text: joinStr, bold: true },
+    { text: '.', bold: false }
+  ], { size: 10, gap: 15 });
+  y -= 6;
+
+  write('Date of Joining & Initial Training:', { bold: true, size: 10, gap: 15 });
+  writeRich([
+    { text: 'You are expected to join on ', bold: false },
+    { text: joinStr, bold: true },
+    { text: ' at ', bold: false },
+    { text: timeStr, bold: true },
+    { text: ' for an induction and training program. The training will be held from ', bold: false },
+    { text: '10:00 AM to 5:00 PM', bold: true },
+    { text: ' at ', bold: false },
+    { text: venue, bold: true },
+    { text: '. Please carry all necessary documents (educational certificates, ID proofs, previous experience letters, etc.) on the day of joining.', bold: false }
+  ], { size: 10, gap: 14 });
+  y -= 8;
+
+  if (reportLoc) {
+    writeRich([
+      { text: 'Your assigned reporting area will be: ', bold: false },
+      { text: reportLoc, bold: true }
+    ], { size: 10, gap: 15 });
+  }
+
+  // --- Closing zone (fixed near footer): signature left, stamp right, Director left ---
+  // No HR block, no "Authorized Signatory", no mid-page seal.
+  const closingBandBottom = contentBottomY + 18;
+  const closingBandTop = contentBottomY + 118;
+  y = Math.min(y - 36, closingBandTop);
+
+  const [sig, logoWithStamp, stamp] = await Promise.all([
+    loadImage(doc, company?.branding?.signatureUrl),
+    loadImage(doc, company?.branding?.logoWithStampUrl),
+    loadImage(doc, company?.branding?.stampUrl)
+  ]);
+  const seal = logoWithStamp || stamp;
+
+  if (sig) {
+    const d = sig.scaleToFit(128, 40);
+    page.drawImage(sig, {
+      x: MARGIN_X,
+      y: closingBandBottom + 36,
+      width: d.width,
+      height: d.height
+    });
+  }
+
+  if (seal) {
+    const d = seal.scaleToFit(88, 88);
+    page.drawImage(seal, {
+      x: PAGE_W - MARGIN_X - d.width,
+      y: closingBandBottom + 22,
+      width: d.width,
+      height: d.height,
+      opacity: 0.95
+    });
+  }
+
+  page.drawText('Director', {
+    x: MARGIN_X,
+    y: closingBandBottom + 14,
+    size: 10,
+    font: bold,
+    color: ink
+  });
+
+  const file = path.join(GENERATED_DOC_DIR, `appointment-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(file, await doc.save());
+  return relPath(file);
+};
+
+
+/**
  * Generate a company-issued statutory document (appointment letter, NDA,
  * handbook acknowledgment, code of conduct) as a PDF on the company page
  * template, sealed with stamp + authorized-signatory signature when configured.
@@ -1084,6 +1387,34 @@ export const generateLetterFromTemplate = async ({
     ...fields
   };
 
+  // Appointment letters always use the Harish layout (never AcroForm / company-doc / seal).
+  if (template?.type === 'AppointmentLetter') {
+    const pdfFileUrl = await generateAppointmentLetterPdf({
+      company,
+      employeeName: merged.employeeName || merged.Name,
+      firstName: merged.firstName,
+      designation: merged.designation || merged.Role,
+      joiningDate: merged.joiningDate || merged['Date of joining'] || merged.date,
+      letterDate: merged.date || merged.Date || merged.joiningDate,
+      location: merged.location || merged.Location,
+      addressLines: [
+        merged.addressLine1 || merged.Address,
+        merged.addressLine2,
+        merged.addressCityLine
+      ].filter(Boolean),
+      phone: merged.phone || merged.Phone || merged.Mobile,
+      trainingVenue: merged.trainingVenue || 'Vivanta, Begumpet, Hyderabad',
+      joiningTime: merged.joiningTime || '10:00 AM',
+      honorific: merged.honorific || ''
+    });
+    if (destDir === GENERATED_DOC_DIR) return pdfFileUrl;
+    const bytes = await fsp.readFile(path.resolve(ROOT, pdfFileUrl));
+    const dest = path.join(destDir, `letter-${crypto.randomUUID()}.pdf`);
+    await fsp.writeFile(dest, bytes);
+    try { await fsp.unlink(path.resolve(ROOT, pdfFileUrl)); } catch { /* ignore */ }
+    return relPath(dest);
+  }
+
   // Type-specific fillable PDF only. Company letter outline is page chrome
   // (applied by generateCompanyDocPdf), not an AcroForm source.
   const sourceFile = template?.fileUrl || null;
@@ -1108,9 +1439,8 @@ export const generateLetterFromTemplate = async ({
       'Please retain this letter for your records.'
     ].filter(Boolean);
   } else {
-    paragraphs = paragraphs.map((p) =>
-      String(p).replace(/\{\{(\w+)\}\}/g, (_, key) => String(merged[key] ?? '').trim() || `{{${key}}}`)
-    );
+    const { applyLetterText } = await import('../config/letterFields.js');
+    paragraphs = paragraphs.map((p) => applyLetterText(p, merged));
   }
 
   const generated = await generateCompanyDocPdf({

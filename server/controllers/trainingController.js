@@ -12,7 +12,12 @@ import { logActivity } from '../services/activityService.js';
 export const createSection = asyncHandler(async (req, res) => {
   const { title, description, order } = req.body;
   if (!title) throw new ApiError(400, 'title is required');
-  const section = await TrainingSection.create({ title, description, order: order || 0 });
+  const section = await TrainingSection.create({
+    companyId: req.user.companyId,
+    title,
+    description,
+    order: order || 0
+  });
   await logActivity({
     actor: req.user,
     action: 'training.section',
@@ -56,14 +61,20 @@ export const uploadMedia = asyncHandler(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'No video uploaded (field "video")');
   const { sectionId, title, description, durationSec, order } = req.body;
   if (!mongoose.isValidObjectId(sectionId)) throw new ApiError(400, 'Valid sectionId is required');
-  if (!title) throw new ApiError(400, 'title is required');
+  if (!String(title || '').trim()) throw new ApiError(400, 'title is required');
   const section = await TrainingSection.findById(sectionId);
   if (!section) throw new ApiError(404, 'Section not found');
 
+  // Stamp companyId explicitly — Multer can resume outside AsyncLocalStorage,
+  // so tenantScope's pre-validate stamp is not always available here.
   const media = await TrainingMedia.create({
-    sectionId, title, description,
+    companyId: req.user.companyId,
+    sectionId,
+    title: String(title).trim(),
+    description: description ? String(description).trim() : undefined,
     videoFileUrl: `uploads/training/${req.file.filename}`,
-    durationSec: Number(durationSec) || 0, order: Number(order) || 0
+    durationSec: Number(durationSec) || 0,
+    order: Number(order) || 0
   });
   await logActivity({
     actor: req.user,

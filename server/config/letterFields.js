@@ -15,13 +15,42 @@ export const LETTER_COMMON_FIELDS = [
 const OFFER_EXTRA = [
   { key: 'joiningDate', label: 'Joining date', type: 'text', required: true, onPdf: true },
   { key: 'ctc', label: 'Annual CTC', type: 'text', required: false, onPdf: true },
-  { key: 'offerDate', label: 'Offer date', type: 'text', required: false, onPdf: true }
+  { key: 'offerDate', label: 'Offer date', type: 'text', required: false, onPdf: true },
+  { key: 'companyLocation', label: 'Company / organisation base location', type: 'text', required: false, onPdf: true },
+  { key: 'jobLocation', label: 'Employee job / posting location', type: 'text', required: false, onPdf: true }
 ];
 
 const APPOINTMENT_EXTRA = [
   { key: 'joiningDate', label: 'Effective / joining date', type: 'text', required: true, onPdf: true },
-  { key: 'employeeId', label: 'Employee ID', type: 'text', required: false, onPdf: true }
+  { key: 'employeeId', label: 'Employee ID', type: 'text', required: false, onPdf: true },
+  { key: 'firstName', label: 'First name', type: 'text', required: false, onPdf: true },
+  { key: 'phone', label: 'Mobile / phone', type: 'text', required: false, onPdf: true },
+  { key: 'addressLine1', label: 'Address line 1', type: 'text', required: false, onPdf: true },
+  { key: 'addressLine2', label: 'Address line 2', type: 'text', required: false, onPdf: true },
+  { key: 'addressCityLine', label: 'City / state / PIN', type: 'text', required: false, onPdf: true },
+  { key: 'trainingVenue', label: 'Training venue', type: 'text', required: false, onPdf: true },
+  { key: 'joiningTime', label: 'Joining time', type: 'text', required: false, onPdf: true }
 ];
+
+/** Aliases so templates using {{Name}} / {{Role}} / {{Date of joining}} still fill. */
+export const LETTER_FIELD_ALIASES = {
+  Name: 'employeeName',
+  name: 'employeeName',
+  Role: 'designation',
+  role: 'designation',
+  Position: 'designation',
+  'Date of joining': 'joiningDate',
+  'date of joining': 'joiningDate',
+  Date: 'date',
+  Location: 'location',
+  location: 'location',
+  Address: 'addressLine1',
+  address: 'addressLine1',
+  email: 'email',
+  Phone: 'phone',
+  phone: 'phone',
+  Mobile: 'phone'
+};
 
 const SERVICE_EXTRA = [
   { key: 'employeeId', label: 'Employee ID', type: 'text', required: false, onPdf: true },
@@ -51,13 +80,32 @@ export const validateLetterFields = (type, values = {}) => {
   return defs.filter((f) => f.required && !String(values[f.key] ?? '').trim()).map((f) => f.label);
 };
 
+/** Resolve a placeholder key through aliases to a field value. */
+export const resolveLetterField = (key, fields = {}) => {
+  const k = String(key ?? '').trim();
+  if (!k) return '';
+  if (fields[k] != null && String(fields[k]).trim() !== '') return String(fields[k]).trim();
+  const alias = LETTER_FIELD_ALIASES[k];
+  if (alias && fields[alias] != null && String(fields[alias]).trim() !== '') {
+    return String(fields[alias]).trim();
+  }
+  // Case-insensitive fallback
+  const lower = k.toLowerCase();
+  for (const [fk, fv] of Object.entries(fields)) {
+    if (String(fk).toLowerCase() === lower && String(fv ?? '').trim() !== '') {
+      return String(fv).trim();
+    }
+  }
+  return '';
+};
+
 /** Substitute {{placeholders}} in body paragraphs. */
 export const applyLetterPlaceholders = (paragraphs = [], fields = {}) =>
   paragraphs.map((p) => applyLetterText(p, fields));
 
 /** Substitute {{placeholders}} in a single string (email subject/body, etc.). */
 export const applyLetterText = (text = '', fields = {}) =>
-  String(text ?? '').replace(/\{\{(\w+)\}\}/g, (_, key) => {
-    const v = String(fields[key] ?? '').trim();
-    return v || `{{${key}}}`;
+  String(text ?? '').replace(/\{\{([^}]+)\}\}/g, (_, key) => {
+    const v = resolveLetterField(key, fields);
+    return v || `{{${String(key).trim()}}}`;
   });

@@ -1,18 +1,69 @@
 import nodemailer from 'nodemailer';
-import Company from '../models/Company.js';
+import Company, { pickDefaultMailAccount } from '../models/Company.js';
 import { currentCompanyId } from '../utils/tenantContext.js';
 
 /**
  * Transactional email service.
  *
- * SMTP credentials are stored per-company in the database (Company.mail) and
- * loaded on every send from the active tenant context. When NODE_ENV is "test"
- * or the company has no SMTP user/password, messages fall back to a console
- * stub + in-memory outbox (used by tests). Every message is recorded in the
- * outbox regardless.
+ * SMTP credentials are stored per-company in Company.mailAccounts (default
+ * account) and loaded on every send from the active tenant context. When
+ * NODE_ENV is "test" or the company has no SMTP user/password, messages fall
+ * back to a console stub + in-memory outbox (used by tests).
  */
 
 const outbox = [];
+
+/** Reused SMTP transports keyed by companyId + host/user/port. */
+const transportCache = new Map();
+
+const SMTP_TIMEOUTS = {
+  connectionTimeout: 12_000,
+  greetingTimeout: 12_000,
+  socketTimeout: 45_000
+};
+
+const transportCacheKey = (companyId, mail) =>
+  `${companyId}|${mail.smtpHost || ''}|${mail.smtpPort || ''}|${mail.smtpUser || ''}`;
+
+/** Drop cached transporters (call after SMTP settings change). */
+export const clearMailTransportCache = (companyId = null) => {
+  if (!companyId) {
+    for (const t of transportCache.values()) {
+      try { t.close?.(); } catch { /* ignore */ }
+    }
+    transportCache.clear();
+    return;
+  }
+  const prefix = `${companyId}|`;
+  for (const [key, t] of transportCache.entries()) {
+    if (key.startsWith(prefix)) {
+      try { t.close?.(); } catch { /* ignore */ }
+      transportCache.delete(key);
+    }
+  }
+};
+
+const getOrCreateTransport = (companyId, mail) => {
+  const key = transportCacheKey(companyId, mail);
+  const hit = transportCache.get(key);
+  if (hit) return hit;
+
+  const port = Number(mail.smtpPort) || 465;
+  const user = String(mail.smtpUser).trim();
+  const pass = String(mail.smtpPass).replace(/\s+/g, '');
+  const transport = nodemailer.createTransport({
+    host: (mail.smtpHost && String(mail.smtpHost).trim()) || 'smtp.gmail.com',
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+    pool: true,
+    maxConnections: 2,
+    maxMessages: 50,
+    ...SMTP_TIMEOUTS
+  });
+  transportCache.set(key, transport);
+  return transport;
+};
 
 const loadCompanyMail = async () => {
   if (process.env.NODE_ENV === 'test') return { brandName: 'mirus', transport: null, from: null };
@@ -23,13 +74,13 @@ const loadCompanyMail = async () => {
     return { brandName: 'mirus', transport: null, from: null };
   }
 
-  const company = await Company.findById(companyId).select('name mail contactEmail').lean();
+  const company = await Company.findById(companyId).select('name mail mailAccounts contactEmail').lean();
   if (!company) {
     console.warn(`[email] Company ${companyId} not found — stubbing send.`);
     return { brandName: 'mirus', transport: null, from: null };
   }
 
-  const mail = company.mail || {};
+  const mail = pickDefaultMailAccount(company) || {};
   const brandName = company.name || 'HRMS';
 
   if (!mail.smtpUser || !mail.smtpPass) {
@@ -37,21 +88,15 @@ const loadCompanyMail = async () => {
     return { brandName, transport: null, from: null };
   }
 
-  const port = Number(mail.smtpPort) || 465;
   const user = String(mail.smtpUser).trim();
-  const pass = String(mail.smtpPass).replace(/\s+/g, '');
   const from = (mail.mailFrom && String(mail.mailFrom).trim())
     || `${brandName} <${user}>`;
 
   return {
     brandName,
     from,
-    transport: nodemailer.createTransport({
-      host: (mail.smtpHost && String(mail.smtpHost).trim()) || 'smtp.gmail.com',
-      port,
-      secure: port === 465,
-      auth: { user, pass }
-    })
+    accountLabel: mail.label || 'Primary',
+    transport: getOrCreateTransport(companyId, mail)
   };
 };
 

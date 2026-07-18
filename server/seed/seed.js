@@ -142,7 +142,17 @@ const run = async () => {
       smtpUser: process.env.SMTP_USER || '',
       smtpPass: process.env.SMTP_PASS || '',
       mailFrom: process.env.MAIL_FROM || 'Mirus Med Sciences <hr@mirus.com>'
-    }
+    },
+    mailAccounts: [{
+      label: 'Primary',
+      smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com',
+      smtpPort: Number(process.env.SMTP_PORT) || 465,
+      smtpUser: process.env.SMTP_USER || '',
+      smtpPass: process.env.SMTP_PASS || '',
+      mailFrom: process.env.MAIL_FROM || 'Mirus Med Sciences <hr@mirus.com>',
+      isDefault: true,
+      active: true
+    }]
   });
 
   // Everything below runs inside the demo company's tenant context so companyId
@@ -445,7 +455,7 @@ async function seedLetterTemplates() {
       name: 'Default Offer Letter',
       title: 'Offer of Employment',
       bodyParagraphs: [
-        'We are pleased to extend this Offer of Employment for the position of {{designation}} in our organization, based at {{location}}.',
+        'We are pleased to extend this Offer of Employment for the position of {{designation}} in our organization, based at {{companyLocation}}.',
         'We were impressed with your profile, experience, and the interview discussions. We believe your skills and enthusiasm will be a valuable addition to our {{department}} team. As a {{designation}}, you will play a key role in promoting our products, building strong relationships with healthcare professionals, and contributing to the achievement of sales targets in your assigned territory. This position offers good growth opportunities within the organization for high performers.'
       ],
       emailSubject: DEFAULT_LETTER_EMAIL.OfferLetter.subject,
@@ -454,11 +464,14 @@ async function seedLetterTemplates() {
     {
       type: 'AppointmentLetter',
       name: 'Default Appointment Letter',
-      title: 'Letter of Appointment',
+      title: 'APPOINTMENT LETTER',
+      // Display/email only — PDF body is locked to Harish layout in generateAppointmentLetterPdf.
       bodyParagraphs: [
-        'Dear {{employeeName}},',
-        'This letter confirms your appointment as {{designation}} at {{companyName}}, effective {{joiningDate}}.',
-        'Your employment is governed by the terms of your offer letter and company policies.'
+        'Dear {{firstName}},',
+        'We are pleased to confirm your appointment as {{designation}} with effect from {{joiningDate}}.',
+        'Date of Joining & Initial Training:',
+        'You are expected to join on {{joiningDate}} at {{joiningTime}} for an induction and training program. The training will be held from 10:00 AM to 5:00 PM at {{trainingVenue}}. Please carry all necessary documents (educational certificates, ID proofs, previous experience letters, etc.) on the day of joining.',
+        'Your assigned reporting area will be: {{location}}'
       ],
       emailSubject: DEFAULT_LETTER_EMAIL.AppointmentLetter.subject,
       emailBody: DEFAULT_LETTER_EMAIL.AppointmentLetter.body

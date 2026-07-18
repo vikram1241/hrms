@@ -29,7 +29,9 @@ export default function DocCenterPage() {
   const dispatch = useDispatch();
   const types = useAsync(() => listTypes(), []);
 
-  const [gen, setGen] = useState({ userId: '', type: 'AppointmentLetter', effectiveDate: today(), designation: '' });
+  const [gen, setGen] = useState({
+    userId: '', type: 'AppointmentLetter', effectiveDate: today(), designation: '', location: ''
+  });
   const [genBusy, setGenBusy] = useState(false);
 
   const [typeOpen, setTypeOpen] = useState(false);
@@ -48,9 +50,23 @@ export default function DocCenterPage() {
   const doIssue = async () => {
     if (!gen.userId) return dispatch(notifyError('Select an employee.'));
     setGenBusy(true);
-    try { await issueDocument(gen); dispatch(notifySuccess('Document issued.')); }
-    catch (err) { dispatch(notifyError(err.uiMessage || 'Could not issue document.')); }
-    finally { setGenBusy(false); }
+    try {
+      const payload = {
+        userId: gen.userId,
+        type: gen.type,
+        effectiveDate: gen.effectiveDate,
+        designation: gen.designation
+      };
+      if (gen.type === 'AppointmentLetter' && String(gen.location || '').trim()) {
+        payload.location = String(gen.location).trim();
+      }
+      await issueDocument(payload);
+      dispatch(notifySuccess('Document issued.'));
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Could not issue document.'));
+    } finally {
+      setGenBusy(false);
+    }
   };
 
   const saveType = async (e) => {
@@ -130,6 +146,17 @@ export default function DocCenterPage() {
               <TextField type="date" size="small" label="Effective date" InputLabelProps={{ shrink: true }} value={gen.effectiveDate} onChange={(e) => setGen({ ...gen, effectiveDate: e.target.value })} />
               <JobRoleSelect value={gen.designation} onChange={(v) => setGen({ ...gen, designation: v })} />
             </div>
+            {gen.type === 'AppointmentLetter' && (
+              <TextField
+                size="small"
+                fullWidth
+                label="Reporting area (optional)"
+                placeholder="e.g. Nizamabad"
+                value={gen.location}
+                onChange={(e) => setGen({ ...gen, location: e.target.value })}
+                helperText="Leave blank to omit the reporting-area line on the letter."
+              />
+            )}
             <Button onClick={doIssue} loading={genBusy}>Issue &amp; seal document</Button>
             <p className="text-xs text-muted">The company stamp &amp; authorized signature (from Company Settings) are printed on the PDF.</p>
           </div>

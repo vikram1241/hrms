@@ -16,7 +16,12 @@ test('onboarding wizard advances stage through all five steps', async () => {
   let status = await agent.get('/api/onboarding/status');
   assert.equal(status.body.stage, 'personal');
 
-  await agent.patch('/api/onboarding/personal').send({ firstName: 'Rahul', lastName: 'Kumar', dateOfBirth: '1995-03-12', gender: 'Male' });
+  // Empty bloodGroup must be accepted (wizard sends '' when optional field left blank).
+  const personal = await agent.patch('/api/onboarding/personal').send({
+    firstName: 'Rahul', lastName: 'Kumar', dateOfBirth: '1995-03-12', gender: 'Male', bloodGroup: '', maritalStatus: 'Single'
+  });
+  assert.equal(personal.status, 200);
+  assert.equal(personal.body.stage, 'family');
   await agent.patch('/api/onboarding/family').send({ familyDetails: [{ name: 'Mr Kumar', relationship: 'Father', dependent: true }] });
   await agent.patch('/api/onboarding/contact').send({
     personalMobile: '9876543210', emergencyContactName: 'Sister', emergencyContactRelation: 'Sibling',

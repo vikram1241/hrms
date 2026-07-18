@@ -20,8 +20,22 @@ import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const STEPS = ['Personal', 'Family', 'Contact', 'Previous Employer', 'Bank'];
 const GENDERS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
+const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const RELATIONS = ['Father', 'Mother', 'Spouse', 'Sibling', 'Child', 'Other'];
 const stageToStep = { personal: 0, family: 1, contact: 2, experience: 3, bank: 4, completed: 4 };
+
+/** Build personal PATCH body — omit blank optional enums so validation/save succeed. */
+const personalPayload = (p) => {
+  const body = {
+    firstName: p.firstName?.trim(),
+    lastName: p.lastName?.trim(),
+    dateOfBirth: p.dateOfBirth,
+    gender: p.gender,
+    maritalStatus: p.maritalStatus || 'Single'
+  };
+  if (p.bloodGroup) body.bloodGroup = p.bloodGroup;
+  return body;
+};
 
 const emptyEmployer = () => ({
   employerName: '',
@@ -210,7 +224,10 @@ export default function OnboardingPage() {
               <TextField label="Gender" select value={personal.gender} onChange={(e) => setPersonal({ ...personal, gender: e.target.value })} fullWidth>
                 {GENDERS.map((g) => <MenuItem key={g} value={g}>{g}</MenuItem>)}
               </TextField>
-              <TextField label="Blood Group" value={personal.bloodGroup} onChange={(e) => setPersonal({ ...personal, bloodGroup: e.target.value })} fullWidth />
+              <TextField label="Blood Group (optional)" select value={personal.bloodGroup} onChange={(e) => setPersonal({ ...personal, bloodGroup: e.target.value })} fullWidth>
+                <MenuItem value="">—</MenuItem>
+                {BLOOD_GROUPS.map((b) => <MenuItem key={b} value={b}>{b}</MenuItem>)}
+              </TextField>
               <TextField label="Marital Status" select value={personal.maritalStatus} onChange={(e) => setPersonal({ ...personal, maritalStatus: e.target.value })} fullWidth>
                 {['Single', 'Married', 'Divorced', 'Widowed'].map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
               </TextField>
@@ -347,7 +364,20 @@ export default function OnboardingPage() {
           {/* Footer nav */}
           <div className="mt-6 flex items-center justify-between border-t border-line pt-4">
             <Button variant="ghost" onClick={back} disabled={active === 0}><ArrowLeft size={16} /> Back</Button>
-            {active === 0 && <Button loading={saving} onClick={() => run(() => savePersonal(personal), next)}>Save & Proceed <ArrowRight size={16} /></Button>}
+            {active === 0 && (
+              <Button
+                loading={saving}
+                onClick={() => {
+                  if (!personal.firstName?.trim() || !personal.lastName?.trim() || !personal.dateOfBirth || !personal.gender) {
+                    dispatch(notifyError('Please fill first name, last name, date of birth, and gender.'));
+                    return;
+                  }
+                  run(() => savePersonal(personalPayload(personal)), next);
+                }}
+              >
+                Save & Proceed <ArrowRight size={16} />
+              </Button>
+            )}
             {active === 1 && <Button loading={saving} onClick={() => run(() => saveFamily(family), next)}>Save & Proceed <ArrowRight size={16} /></Button>}
             {active === 2 && <Button loading={saving} onClick={() => run(() => saveContact(contact), next)}>Save & Proceed <ArrowRight size={16} /></Button>}
             {active === 3 && <Button loading={saving || Boolean(uploadingKey)} onClick={submitExperience}>Save & Proceed <ArrowRight size={16} /></Button>}

@@ -52,8 +52,27 @@ export const getOnboardingStatus = asyncHandler(async (req, res) => {
 /** PATCH /api/onboarding/personal — wizard step 1. */
 export const savePersonal = asyncHandler(async (req, res) => {
   const user = await loadSelf(req);
-  const fields = ['firstName', 'lastName', 'dateOfBirth', 'gender', 'bloodGroup', 'maritalStatus'];
-  fields.forEach((f) => { if (req.body[f] !== undefined) user.personalDetails[f] = req.body[f]; });
+  user.personalDetails = user.personalDetails || {};
+  const required = ['firstName', 'lastName', 'dateOfBirth', 'gender'];
+  for (const f of required) {
+    const v = req.body[f];
+    if (v !== undefined && v !== null && String(v).trim() !== '') {
+      user.personalDetails[f] = f === 'dateOfBirth' ? v : String(v).trim();
+    }
+  }
+  if (req.body.maritalStatus !== undefined && String(req.body.maritalStatus).trim() !== '') {
+    user.personalDetails.maritalStatus = String(req.body.maritalStatus).trim();
+  }
+  // Optional enum — blank means clear / leave unset (never persist '').
+  if (Object.prototype.hasOwnProperty.call(req.body, 'bloodGroup')) {
+    const bg = req.body.bloodGroup;
+    if (bg === undefined || bg === null || String(bg).trim() === '') {
+      delete user.personalDetails.bloodGroup;
+      user.markModified('personalDetails');
+    } else {
+      user.personalDetails.bloodGroup = String(bg).trim();
+    }
+  }
   advanceStage(user, 'personal');
   await user.save();
   res.status(200).json({ success: true, message: 'Personal details saved', stage: user.onboardingStage, personalDetails: user.personalDetails });

@@ -109,7 +109,14 @@ export default function CreateOfferDialog({ open, onClose, onSaved }) {
                 required
                 size="medium"
               />
-              <TextField label="Job Location" value={form.location} onChange={set('location')} fullWidth placeholder="e.g. Hyderabad, Telangana" />
+              <TextField
+                label="Job Location / Reporting area"
+                value={form.location}
+                onChange={set('location')}
+                fullWidth
+                placeholder="e.g. Nizamabad"
+                helperText="Used as reporting area on the appointment letter. Leave blank to omit that line."
+              />
               <TextField label="Department" value={form.department} onChange={set('department')} select fullWidth required>
                 {DEPARTMENTS.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
               </TextField>

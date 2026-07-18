@@ -4,6 +4,7 @@ import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
+import TrainingVideoPlayer from '../../components/feature/TrainingVideoPlayer.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { listSections, listMedia, mediaStreamUrl, setProgress, myProgress } from '../../api/training.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
@@ -42,7 +43,7 @@ export default function MyTrainingPage() {
                     ? <span className="flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 size={14} /> Completed</span>
                     : <Button size="sm" variant="secondary" onClick={() => complete(m._id)}>Mark complete</Button>}
                 </div>
-                <video controls preload="metadata" className="w-full rounded" src={mediaStreamUrl(m._id)} />
+                <TrainingVideoPlayer src={mediaStreamUrl(m._id)} title={m.title} />
                 {m.description && <p className="mt-2 text-sm text-muted">{m.description}</p>}
               </div>
             ))}

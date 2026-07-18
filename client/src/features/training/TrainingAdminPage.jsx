@@ -2,19 +2,26 @@ import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { Plus, Upload, GraduationCap, Trash2 } from 'lucide-react';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import IconButton from '@mui/material/IconButton';
+import { Plus, Upload, GraduationCap, Trash2, Play, X } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
+import TrainingVideoPlayer from '../../components/feature/TrainingVideoPlayer.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { listSections, createSection, deleteSection, listMedia, uploadMedia, deleteMedia } from '../../api/training.js';
+import {
+  listSections, createSection, deleteSection, listMedia, uploadMedia, deleteMedia, mediaStreamUrl
+} from '../../api/training.js';
 import {
   MAX_TRAINING_VIDEO_MB,
   MAX_TRAINING_VIDEO_BYTES,
   TRAINING_VIDEO_ACCEPT,
   TRAINING_VIDEO_FORMAT_LABEL,
-  TRAINING_VIDEO_MIME
+  isAllowedTrainingVideo
 } from '../../config/trainingUpload.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
@@ -27,6 +34,7 @@ export default function TrainingAdminPage() {
   const [busy, setBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [preview, setPreview] = useState(null); // { _id, title }
 
   const saveSection = async () => {
     if (!sec.title) return dispatch(notifyError('Enter a section title.'));
@@ -37,7 +45,7 @@ export default function TrainingAdminPage() {
     if (!up.sectionId || !up.title || !up.file) {
       return dispatch(notifyError('Section, title and video are required.'));
     }
-    if (!TRAINING_VIDEO_MIME.has(up.file.type)) {
+    if (!isAllowedTrainingVideo(up.file)) {
       return dispatch(notifyError(`Video must be ${TRAINING_VIDEO_FORMAT_LABEL}.`));
     }
     if (up.file.size > MAX_TRAINING_VIDEO_BYTES) {
@@ -140,7 +148,8 @@ export default function TrainingAdminPage() {
             <tr className="text-left text-muted">
               <th className="pb-2">Title</th>
               <th className="pb-2">Section</th>
-              <th className="pb-2 text-right" />
+              <th className="pb-2 text-center">Play</th>
+              <th className="pb-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -153,6 +162,16 @@ export default function TrainingAdminPage() {
                 <tr key={m._id} className="border-t border-line">
                   <td className="py-2 font-medium text-ink">{m.title}</td>
                   <td className="py-2 text-muted">{sectionTitle}</td>
+                  <td className="py-2 text-center">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700"
+                      onClick={() => setPreview({ _id: m._id, title: m.title })}
+                      aria-label={`Play ${m.title}`}
+                    >
+                      <Play size={14} fill="currentColor" /> Play
+                    </button>
+                  </td>
                   <td className="py-2 text-right">
                     <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget({ kind: 'media', _id: m._id, label: m.title })} aria-label={`Delete ${m.title}`}>
                       <Trash2 size={14} />
@@ -161,10 +180,40 @@ export default function TrainingAdminPage() {
                 </tr>
               );
             })}
-            {!media.data?.length && <tr><td colSpan={3} className="py-6 text-center text-muted">No videos uploaded yet.</td></tr>}
+            {!media.data?.length && <tr><td colSpan={4} className="py-6 text-center text-muted">No videos uploaded yet.</td></tr>}
           </tbody>
         </table>
       </CardBody></Card>
+
+      <Dialog
+        open={Boolean(preview)}
+        onClose={() => setPreview(null)}
+        maxWidth="md"
+        fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+      >
+        <DialogTitle sx={{ pr: 6, fontWeight: 700 }}>
+          {preview?.title || 'Training video'}
+          <IconButton
+            onClick={() => setPreview(null)}
+            sx={{ position: 'absolute', right: 12, top: 12 }}
+            size="small"
+            aria-label="Close player"
+          >
+            <X size={18} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: '#0f0f0f', p: 2 }}>
+          {preview?._id && (
+            <TrainingVideoPlayer
+              key={preview._id}
+              src={mediaStreamUrl(preview._id)}
+              title={preview.title}
+              autoPlay
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
