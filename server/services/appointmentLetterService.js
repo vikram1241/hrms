@@ -1,9 +1,13 @@
 import path from 'node:path';
 import EmployeeDocument from '../models/EmployeeDocument.js';
 import Company from '../models/Company.js';
-import { generateAppointmentLetterPdf, GENERATED_DOC_DIR } from './pdfService.js';
+import {
+  generateAppointmentLetterPdf,
+  generateLetterFromTemplate,
+  GENERATED_DOC_DIR
+} from './pdfService.js';
 import { resolveDefaultLetterTemplate } from '../controllers/letterTemplateController.js';
-import { applyLetterText } from '../config/letterFields.js';
+import { applyLetterText, applyLetterPlaceholders } from '../config/letterFields.js';
 import { DEFAULT_LETTER_EMAIL } from '../models/LetterTemplate.js';
 import { sendAppointmentLetter } from './emailService.js';
 import { queueMailJob } from './mailQueue.js';
@@ -85,8 +89,9 @@ export const appointmentFileName = (employeeName) => {
 };
 
 /**
- * Build PDF for an appointment letter (Harish layout only).
- * Template bodyParagraphs are used for email only — PDF copy is locked in pdfService.
+ * Build PDF for an appointment letter.
+ * Uses the default AppointmentLetter template when present (uploaded PDF body /
+ * AcroForm / bodyParagraphs). Falls back to the legacy Harish layout otherwise.
  */
 export const buildAppointmentLetterPdf = async ({
   user,
@@ -107,9 +112,11 @@ export const buildAppointmentLetterPdf = async ({
   // Only non-empty reporting area is rendered on the PDF ("Your assigned reporting area…").
   const loc = String(location ?? user.employeeDetails?.workLocation ?? '').trim();
   const addressLines = addressLinesOf(user);
+  const address = addressLines.join(', ');
   const honorific = honorificOf(user);
   const trainingVenue = 'Vivanta, Begumpet, Hyderabad';
   const joiningTime = '10:00 AM';
+  const email = user.email || '';
 
   const fields = {
     employeeName,
@@ -129,45 +136,67 @@ export const buildAppointmentLetterPdf = async ({
     phone,
     Phone: phone,
     Mobile: phone,
-    email: user.email || '',
-    addressLine1: addressLines[0] || '',
-    Address: addressLines[0] || '',
+    email,
+    Email: email,
+    address,
+    Address: address,
+    addressLine1: addressLines[0] || address,
     addressLine2: addressLines[1] || '',
     addressCityLine: addressLines[addressLines.length - 1] || '',
     ctc: annualCTCPaisa != null ? formatINR(annualCTCPaisa) : '',
     trainingVenue,
-    joiningTime
+    joiningTime,
+    honorific
   };
 
   const letterTpl = await resolveDefaultLetterTemplate('AppointmentLetter');
+  const hasTemplateBody = Array.isArray(letterTpl?.bodyParagraphs) && letterTpl.bodyParagraphs.length > 0;
+  const hasTemplateFile = Boolean(letterTpl?.fileUrl);
 
-  const pdfFileUrl = await generateAppointmentLetterPdf({
-    company,
-    employeeName,
-    firstName,
-    designation: desig,
-    joiningDate: joinStr,
-    letterDate: joinStr,
-    location: loc,
-    addressLines,
-    phone,
-    trainingVenue,
-    joiningTime,
-    honorific
-  });
+  let pdfFileUrl;
+  if (letterTpl && (hasTemplateBody || hasTemplateFile)) {
+    pdfFileUrl = await generateLetterFromTemplate({
+      template: letterTpl,
+      fields,
+      company,
+      destDir: GENERATED_DOC_DIR
+    });
+  } else {
+    pdfFileUrl = await generateAppointmentLetterPdf({
+      company,
+      employeeName,
+      firstName,
+      designation: desig,
+      joiningDate: joinStr,
+      letterDate: joinStr,
+      location: loc,
+      addressLines,
+      phone,
+      trainingVenue,
+      joiningTime,
+      honorific
+    });
+  }
+
+  const filledTitle = letterTpl?.title
+    ? applyLetterText(letterTpl.title, fields)
+    : 'APPOINTMENT LETTER';
 
   return {
     pdfFileUrl,
-    title: 'APPOINTMENT LETTER',
+    title: filledTitle || 'APPOINTMENT LETTER',
     fields,
     letterTpl,
     employeeName,
-    fileName: appointmentFileName(firstName || employeeName)
+    fileName: appointmentFileName(firstName || employeeName),
+    bodyPreview: hasTemplateBody
+      ? applyLetterPlaceholders(letterTpl.bodyParagraphs, fields)
+      : null
   };
 };
 
 /**
- * Generate Appointment Letter (Harish), persist as EmployeeDocument, email PDF.
+ * Generate Appointment Letter, persist as EmployeeDocument, email PDF.
  */
 export const issueAndEmailAppointmentLetter = async ({
   user,

@@ -465,13 +465,13 @@ async function seedLetterTemplates() {
       type: 'AppointmentLetter',
       name: 'Default Appointment Letter',
       title: 'APPOINTMENT LETTER',
-      // Display/email only — PDF body is locked to Harish layout in generateAppointmentLetterPdf.
+      // Display/email + PDF body — generation prefers these paragraphs (or AcroForm PDF).
       bodyParagraphs: [
-        'Dear {{firstName}},',
+        'Dear {{employeeName}},',
         'We are pleased to confirm your appointment as {{designation}} with effect from {{joiningDate}}.',
+        'Your assigned reporting area will be: {{Location}}',
         'Date of Joining & Initial Training:',
-        'You are expected to join on {{joiningDate}} at {{joiningTime}} for an induction and training program. The training will be held from 10:00 AM to 5:00 PM at {{trainingVenue}}. Please carry all necessary documents (educational certificates, ID proofs, previous experience letters, etc.) on the day of joining.',
-        'Your assigned reporting area will be: {{location}}'
+        'You are expected to join on {{joiningDate}}. Please carry all necessary documents (educational certificates, ID proofs, previous experience letters, etc.) on the day of joining.'
       ],
       emailSubject: DEFAULT_LETTER_EMAIL.AppointmentLetter.subject,
       emailBody: DEFAULT_LETTER_EMAIL.AppointmentLetter.body

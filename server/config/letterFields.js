@@ -25,6 +25,8 @@ const APPOINTMENT_EXTRA = [
   { key: 'employeeId', label: 'Employee ID', type: 'text', required: false, onPdf: true },
   { key: 'firstName', label: 'First name', type: 'text', required: false, onPdf: true },
   { key: 'phone', label: 'Mobile / phone', type: 'text', required: false, onPdf: true },
+  { key: 'email', label: 'Email', type: 'text', required: false, onPdf: true },
+  { key: 'address', label: 'Full address', type: 'text', required: false, onPdf: true },
   { key: 'addressLine1', label: 'Address line 1', type: 'text', required: false, onPdf: true },
   { key: 'addressLine2', label: 'Address line 2', type: 'text', required: false, onPdf: true },
   { key: 'addressCityLine', label: 'City / state / PIN', type: 'text', required: false, onPdf: true },
@@ -43,12 +45,9 @@ export const LETTER_FIELD_ALIASES = {
   'date of joining': 'joiningDate',
   Date: 'date',
   Location: 'location',
-  location: 'location',
-  Address: 'addressLine1',
-  address: 'addressLine1',
-  email: 'email',
+  Address: 'address',
+  Email: 'email',
   Phone: 'phone',
-  phone: 'phone',
   Mobile: 'phone'
 };
 

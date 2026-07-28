@@ -15,9 +15,9 @@ export const LETTER_TYPE_LABELS = {
 };
 
 export const LETTER_PLACEHOLDERS = [
-  'employeeName', 'designation', 'department', 'employeeId', 'date',
+  'employeeName', 'designation', 'department', 'employeeId', 'date', 'Date',
   'companyName', 'joiningDate', 'lastWorkingDay', 'ctc', 'offerDate', 'location',
-  'offerUrl'
+  'address', 'email', 'phone', 'offerUrl'
 ];
 
 /** Default email subject/body per letter type ({{placeholders}} substituted at send time). */
@@ -73,6 +73,8 @@ const LetterTemplateSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   title: { type: String, trim: true },
   bodyParagraphs: [{ type: String }],
+  /** Placeholder keys detected from the last uploaded PDF ({{…}} and/or AcroForm names). */
+  detectedPlaceholders: [{ type: String }],
   /** Email subject with {{placeholders}} — used when generating/sending the letter. */
   emailSubject: { type: String, trim: true, default: '' },
   /** Email body (plain text) with {{placeholders}} — PDF is attached at send time. */

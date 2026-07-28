@@ -35,7 +35,9 @@ const emptyForm = (type, emailDefaults = {}) => {
     isDefault: false,
     active: true,
     file: null,
-    existingFileName: null
+    existingFileName: null,
+    detectedPlaceholders: [],
+    syncBodyFromPdf: true
   };
 };
 
@@ -53,6 +55,7 @@ export default function LetterTemplatesSection() {
   const placeholders = data?.meta?.placeholders || [];
   const emailDefaults = data?.meta?.emailDefaults || {};
   const byType = (t) => templates.filter((x) => x.type === t);
+  const isAppointment = form?.type === 'AppointmentLetter';
 
   const openCreate = (type) => setForm(emptyForm(type, emailDefaults));
   const openEdit = (t) => {
@@ -68,7 +71,9 @@ export default function LetterTemplatesSection() {
       isDefault: Boolean(t.isDefault),
       active: t.active !== false,
       file: null,
-      existingFileName: t.originalFileName || (t.hasFile ? 'Uploaded PDF' : null)
+      existingFileName: t.originalFileName || (t.hasFile ? 'Uploaded PDF' : null),
+      detectedPlaceholders: t.detectedPlaceholders || [],
+      syncBodyFromPdf: true
     });
   };
 
@@ -88,12 +93,21 @@ export default function LetterTemplatesSection() {
     fd.append('bodyParagraphs', JSON.stringify(
       form.body.split('\n').map((s) => s.trim()).filter(Boolean)
     ));
-    if (form.file) fd.append('file', form.file);
+    if (form.file) {
+      fd.append('file', form.file);
+      if (form.type === 'AppointmentLetter') {
+        fd.append('syncBodyFromPdf', String(form.syncBodyFromPdf !== false));
+      }
+    }
 
     try {
       if (form._id) await updateLetterTemplate(form._id, fd);
       else await createLetterTemplate(fd);
-      dispatch(notifySuccess('Letter template saved.'));
+      dispatch(notifySuccess(
+        form.type === 'AppointmentLetter' && form.file
+          ? 'Appointment template saved. Body and placeholders synced from the PDF.'
+          : 'Letter template saved.'
+      ));
       setForm(null);
       reload();
     } catch (err) {
@@ -117,11 +131,16 @@ export default function LetterTemplatesSection() {
     }
   };
 
+  const shownPlaceholders = isAppointment && form.detectedPlaceholders?.length
+    ? form.detectedPlaceholders
+    : placeholders;
+
   return (
     <div>
       <p className="mb-4 text-sm text-muted">
         Upload a default letterhead PDF per letter type. Configure the email subject and body with placeholders —
         they are filled when you generate a letter, and the PDF is attached. Mark one template as default per type.
+        For Appointment Letters, uploading a PDF with {'{{placeholders}}'} (or AcroForm fields) updates the letter body used at generation.
       </p>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -145,6 +164,11 @@ export default function LetterTemplatesSection() {
                           {t.isDefault && <StatusBadge status="active" label="Default" />}
                           <StatusBadge status={t.active ? 'active' : 'inactive'} />
                         </p>
+                        {type === 'AppointmentLetter' && t.detectedPlaceholders?.length > 0 && (
+                          <p className="mt-1 truncate text-[11px] text-muted">
+                            Placeholders: {t.detectedPlaceholders.map((p) => `{{${p}}}`).join(' ')}
+                          </p>
+                        )}
                         {(t.emailSubject || emailDefaults[type]?.subject) && (
                           <p className="mt-1 flex items-center gap-1 truncate text-[11px] text-muted">
                             <Mail size={11} className="shrink-0 text-primary-600" />
@@ -189,7 +213,9 @@ export default function LetterTemplatesSection() {
               <TextField size="small" label="Heading / title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
             </div>
             <div className="rounded-lg border border-dashed border-line bg-surface p-4">
-              <p className="mb-2 text-sm font-medium text-ink">Letterhead PDF (optional)</p>
+              <p className="mb-2 text-sm font-medium text-ink">
+                {isAppointment ? 'Appointment letter PDF' : 'Letterhead PDF (optional)'}
+              </p>
               {(form.file || form.existingFileName) && (
                 <p className="mb-2 flex items-center gap-1.5 text-xs text-muted">
                   <FileText size={13} className="text-primary-600" />
@@ -205,20 +231,42 @@ export default function LetterTemplatesSection() {
                 type="file"
                 accept=".pdf,application/pdf"
                 hidden
-                onChange={(e) => setForm({ ...form, file: e.target.files?.[0] || null })}
+                onChange={(e) => setForm({
+                  ...form,
+                  file: e.target.files?.[0] || null,
+                  syncBodyFromPdf: true
+                })}
               />
               <p className="mt-2 text-xs text-muted">
-                Prefer a fillable PDF with AcroForm field names matching placeholders. Max 15 MB.
+                {isAppointment
+                  ? 'Upload a designed PDF with {{placeholders}}. Generation fills values in place (same layout/fonts); user data is bold. AcroForm PDFs are also supported. Max 15 MB.'
+                  : 'Prefer a fillable PDF with AcroForm field names matching placeholders. Max 15 MB.'}
               </p>
+              {isAppointment && form.file && (
+                <FormControlLabel
+                  className="mt-1"
+                  control={(
+                    <Checkbox
+                      checked={form.syncBodyFromPdf !== false}
+                      onChange={(e) => setForm({ ...form, syncBodyFromPdf: e.target.checked })}
+                      size="small"
+                    />
+                  )}
+                  label="Replace letter body from uploaded PDF"
+                />
+              )}
             </div>
             <TextField
               size="small"
               fullWidth
               multiline
-              minRows={3}
-              label="Letter body fallback (one paragraph per line)"
+              minRows={isAppointment ? 5 : 3}
+              label={isAppointment ? 'Letter body (one paragraph per line — used when generating)' : 'Letter body fallback (one paragraph per line)'}
               value={form.body}
               onChange={(e) => setForm({ ...form, body: e.target.value })}
+              helperText={isAppointment
+                ? 'Synced from the PDF on upload. Edit here if you need tweaks before generating.'
+                : undefined}
             />
 
             <div className="rounded-lg border border-line p-3">
@@ -249,8 +297,10 @@ export default function LetterTemplatesSection() {
             </div>
 
             <div className="rounded-lg bg-surface p-2 text-xs text-muted">
-              <span className="font-medium text-ink">Placeholders:</span>{' '}
-              {placeholders.map((p) => `{{${p}}}`).join('  ')}
+              <span className="font-medium text-ink">
+                {isAppointment && form.detectedPlaceholders?.length ? 'Detected placeholders:' : 'Placeholders:'}
+              </span>{' '}
+              {shownPlaceholders.map((p) => `{{${p}}}`).join('  ') || '—'}
             </div>
             <FormControlLabel
               control={<Checkbox checked={form.isDefault} onChange={(e) => setForm({ ...form, isDefault: e.target.checked })} size="small" />}

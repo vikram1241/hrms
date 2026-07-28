@@ -1013,11 +1013,11 @@ export const bakeSignatureOnOffer = async (sourceRelPath, signatureBase64, { nam
 // --- Epic 10: company-sealed statutory document generation ---
 
 /**
- * Appointment letter PDF — locked to Harish reference layout.
- * Never uses generateCompanyDocPdf / HR block / mid-page seal.
- *
- * Sections: date (right) → recipient → centered APPOINTMENT LETTER → body
- * → large gap → signature (optional) + Director (left) + stamp (optional, bottom-right).
+ * Appointment letter PDF.
+ * When `bodyParagraphs` is provided (from uploaded AppointmentLetter template),
+ * those paragraphs (already placeholder-substituted) are rendered instead of the
+ * legacy Harish locked copy. Layout: date → optional recipient → title → body →
+ * Director + signature/stamp.
  *
  * @returns {Promise<string>} repo-relative path to the written file.
  */
@@ -1033,7 +1033,11 @@ export const generateAppointmentLetterPdf = async ({
   phone = '',
   trainingVenue = '',
   joiningTime = '10:00 AM',
-  honorific = ''
+  honorific = '',
+  title: titleOpt = 'APPOINTMENT LETTER',
+  bodyParagraphs = null,
+  bodyFields = null,
+  skipRecipientBlock = false
 } = {}) => {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -1044,6 +1048,10 @@ export const generateAppointmentLetterPdf = async ({
   const { MARGIN_X, CONTENT_WIDTH, contentBottomY } = kit;
   let { page, y } = kit.addDecoratedPage();
 
+  const ensure = (need = 40) => {
+    if (y < contentBottomY + need + 120) ({ page, y } = kit.addDecoratedPage());
+  };
+
   const write = (s, opts = {}) => {
     const size = opts.size ?? 10;
     const f = opts.bold ? bold : font;
@@ -1051,6 +1059,7 @@ export const generateAppointmentLetterPdf = async ({
     const maxChars = opts.maxChars ?? 88;
     const gap = opts.gap ?? (size + 4);
     for (const ln of wrapText(s, maxChars)) {
+      ensure(size + 8);
       page.drawText(ascii(ln), { x, y, size, font: f, color: opts.color || ink });
       y -= gap;
     }
@@ -1065,6 +1074,7 @@ export const generateAppointmentLetterPdf = async ({
       : segmentsOrMarked;
     const lines = wrapRichSegments(segments, maxWidth, size, font, bold);
     for (const line of lines) {
+      ensure(size + 8);
       let cx = x;
       for (const seg of line) {
         const f = seg.bold ? bold : font;
@@ -1088,6 +1098,7 @@ export const generateAppointmentLetterPdf = async ({
   const reportLoc = String(location || '').trim();
   const venue = String(trainingVenue || 'Vivanta, Begumpet, Hyderabad').trim();
   const timeStr = String(joiningTime || '10:00 AM').trim();
+  const useTemplateBody = Array.isArray(bodyParagraphs) && bodyParagraphs.length > 0;
 
   // --- Date (right) ---
   {
@@ -1107,22 +1118,24 @@ export const generateAppointmentLetterPdf = async ({
     y -= 26;
   }
 
-  // --- Recipient block (left) ---
-  write(who, { bold: true, size: 10, gap: 13 });
-  for (const ln of (addressLines || []).map((l) => String(l || '').trim()).filter(Boolean)) {
-    write(ln, { size: 10, gap: 12 });
+  // --- Recipient block (left) — skipped when template body already includes address/greeting ---
+  if (!skipRecipientBlock) {
+    write(who, { bold: true, size: 10, gap: 13 });
+    for (const ln of (addressLines || []).map((l) => String(l || '').trim()).filter(Boolean)) {
+      write(ln, { size: 10, gap: 12 });
+    }
+    if (phone) {
+      writeRich([
+        { text: 'Mobile: ', bold: false },
+        { text: String(phone), bold: true }
+      ], { size: 10, gap: 12 });
+    }
+    y -= 18;
   }
-  if (phone) {
-    writeRich([
-      { text: 'Mobile: ', bold: false },
-      { text: String(phone), bold: true }
-    ], { size: 10, gap: 12 });
-  }
-  y -= 18;
 
   // --- Centered underlined title ---
   {
-    const title = 'APPOINTMENT LETTER';
+    const title = String(titleOpt || 'APPOINTMENT LETTER').trim().toUpperCase() || 'APPOINTMENT LETTER';
     const size = 13;
     const tw = bold.widthOfTextAtSize(title, size);
     const tx = (PAGE_W - tw) / 2;
@@ -1136,45 +1149,78 @@ export const generateAppointmentLetterPdf = async ({
     y -= 30;
   }
 
-  // --- Harish body (locked copy; dynamic values only) ---
-  writeRich([
-    { text: 'Dear ', bold: false },
-    { text: first, bold: true },
-    { text: ',', bold: false }
-  ], { size: 10, gap: 18 });
-
-  writeRich([
-    { text: 'We are pleased to confirm your appointment as ', bold: false },
-    { text: role, bold: true },
-    { text: ' with effect from ', bold: false },
-    { text: joinStr, bold: true },
-    { text: '.', bold: false }
-  ], { size: 10, gap: 15 });
-  y -= 6;
-
-  write('Date of Joining & Initial Training:', { bold: true, size: 10, gap: 15 });
-  writeRich([
-    { text: 'You are expected to join on ', bold: false },
-    { text: joinStr, bold: true },
-    { text: ' at ', bold: false },
-    { text: timeStr, bold: true },
-    { text: ' for an induction and training program. The training will be held from ', bold: false },
-    { text: '10:00 AM to 5:00 PM', bold: true },
-    { text: ' at ', bold: false },
-    { text: venue, bold: true },
-    { text: '. Please carry all necessary documents (educational certificates, ID proofs, previous experience letters, etc.) on the day of joining.', bold: false }
-  ], { size: 10, gap: 14 });
-  y -= 8;
-
-  if (reportLoc) {
+  if (useTemplateBody) {
+    // Template-driven body: static text regular, {{placeholder}} values bold.
+    const { resolveLetterField } = await import('../config/letterFields.js');
+    for (const para of bodyParagraphs) {
+      const text = String(para || '').trim();
+      if (!text) continue;
+      const looksLikeHeading = /:$/.test(text) && text.length < 80 && !/\{\{/.test(text);
+      if (looksLikeHeading) {
+        write(text, { bold: true, size: 10, gap: 15, maxChars: 90 });
+        y -= 6;
+        continue;
+      }
+      if (!/\{\{/.test(text) || !bodyFields) {
+        write(text, { size: 10, gap: 14, maxChars: 90 });
+        y -= 6;
+        continue;
+      }
+      const segments = [];
+      const re = /\{\{\s*([^}]+?)\s*\}\}/g;
+      let last = 0;
+      let m;
+      while ((m = re.exec(text))) {
+        if (m.index > last) segments.push({ text: text.slice(last, m.index), bold: false });
+        const key = String(m[1] || '').trim();
+        const val = resolveLetterField(key, bodyFields);
+        segments.push({ text: val || `{{${key}}}`, bold: true });
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) segments.push({ text: text.slice(last), bold: false });
+      writeRich(segments, { size: 10, gap: 14 });
+      y -= 6;
+    }
+  } else {
+    // Legacy Harish body (fallback when no template body is configured).
     writeRich([
-      { text: 'Your assigned reporting area will be: ', bold: false },
-      { text: reportLoc, bold: true }
+      { text: 'Dear ', bold: false },
+      { text: first, bold: true },
+      { text: ',', bold: false }
+    ], { size: 10, gap: 18 });
+
+    writeRich([
+      { text: 'We are pleased to confirm your appointment as ', bold: false },
+      { text: role, bold: true },
+      { text: ' with effect from ', bold: false },
+      { text: joinStr, bold: true },
+      { text: '.', bold: false }
     ], { size: 10, gap: 15 });
+    y -= 6;
+
+    write('Date of Joining & Initial Training:', { bold: true, size: 10, gap: 15 });
+    writeRich([
+      { text: 'You are expected to join on ', bold: false },
+      { text: joinStr, bold: true },
+      { text: ' at ', bold: false },
+      { text: timeStr, bold: true },
+      { text: ' for an induction and training program. The training will be held from ', bold: false },
+      { text: '10:00 AM to 5:00 PM', bold: true },
+      { text: ' at ', bold: false },
+      { text: venue, bold: true },
+      { text: '. Please carry all necessary documents (educational certificates, ID proofs, previous experience letters, etc.) on the day of joining.', bold: false }
+    ], { size: 10, gap: 14 });
+    y -= 8;
+
+    if (reportLoc) {
+      writeRich([
+        { text: 'Your assigned reporting area will be: ', bold: false },
+        { text: reportLoc, bold: true }
+      ], { size: 10, gap: 15 });
+    }
   }
 
   // --- Closing zone (fixed near footer): signature left, stamp right, Director left ---
-  // No HR block, no "Authorized Signatory", no mid-page seal.
   const closingBandBottom = contentBottomY + 18;
   const closingBandTop = contentBottomY + 118;
   y = Math.min(y - 36, closingBandTop);
@@ -1387,8 +1433,39 @@ export const generateLetterFromTemplate = async ({
     ...fields
   };
 
-  // Appointment letters always use the Harish layout (never AcroForm / company-doc / seal).
+  // Appointment letters: prefer filling the uploaded PDF in place (layout/fonts
+  // preserved; user field values bold). Fall back to bodyParagraphs / Harish.
   if (template?.type === 'AppointmentLetter') {
+    const sourceFile = template?.fileUrl || null;
+    if (sourceFile && (await pdfHasAcroForms(sourceFile))) {
+      const filled = await fillAcroFormPdf(sourceFile, merged);
+      const sealed = await applyAppointmentDirectorAssets(filled, company, { destDir });
+      try { await fsp.unlink(path.resolve(ROOT, filled)); } catch { /* ignore */ }
+      return sealed;
+    }
+
+    if (sourceFile) {
+      try {
+        const filledInPlace = await fillTextPlaceholderPdf(sourceFile, merged, { destDir });
+        if (filledInPlace) {
+          const sealed = await applyAppointmentDirectorAssets(filledInPlace, company, { destDir });
+          if (sealed !== filledInPlace) {
+            try { await fsp.unlink(path.resolve(ROOT, filledInPlace)); } catch { /* ignore */ }
+          }
+          return sealed;
+        }
+      } catch {
+        /* fall through to body / Harish */
+      }
+    }
+
+    const { applyLetterPlaceholders } = await import('../config/letterFields.js');
+    let paragraphs = Array.isArray(template?.bodyParagraphs) ? [...template.bodyParagraphs] : [];
+    const rawParagraphs = [...paragraphs];
+    if (paragraphs.length) {
+      paragraphs = applyLetterPlaceholders(paragraphs, merged);
+    }
+
     const pdfFileUrl = await generateAppointmentLetterPdf({
       company,
       employeeName: merged.employeeName || merged.Name,
@@ -1405,7 +1482,12 @@ export const generateLetterFromTemplate = async ({
       phone: merged.phone || merged.Phone || merged.Mobile,
       trainingVenue: merged.trainingVenue || 'Vivanta, Begumpet, Hyderabad',
       joiningTime: merged.joiningTime || '10:00 AM',
-      honorific: merged.honorific || ''
+      honorific: merged.honorific || '',
+      title: template?.title || 'APPOINTMENT LETTER',
+      bodyParagraphs: rawParagraphs.length ? rawParagraphs : (paragraphs.length ? paragraphs : null),
+      bodyFields: merged,
+      // Template body usually already has Dear / address / contact lines.
+      skipRecipientBlock: rawParagraphs.length > 0 || paragraphs.length > 0
     });
     if (destDir === GENERATED_DOC_DIR) return pdfFileUrl;
     const bytes = await fsp.readFile(path.resolve(ROOT, pdfFileUrl));
@@ -1481,7 +1563,238 @@ export const bakeSignatureOnDoc = async (sourceRelPath, signatureBase64, { name,
   return relPath(file);
 };
 
+/**
+ * Bake company signature (left, above Director) + logo-with-stamp (right)
+ * onto an appointment letter PDF that already has a "Director" label.
+ * Does not add "Authorized Signatory" chrome.
+ * @returns {Promise<string>} repo-relative path
+ */
+export const applyAppointmentDirectorAssets = async (
+  sourceRelPath,
+  company,
+  { destDir = GENERATED_DOC_DIR } = {}
+) => {
+  const sourceAbs = path.resolve(ROOT, sourceRelPath);
+  if (!fs.existsSync(sourceAbs)) throw new ApiError(404, 'Source PDF not found');
+
+  const bytes = await fsp.readFile(sourceAbs);
+  const doc = await PDFDocument.load(bytes);
+  const pages = doc.getPages();
+  const page = pages[pages.length - 1];
+  const { width: pageW } = page.getSize();
+
+  // Locate "Director" baseline from the template text layer when possible.
+  let directorY = 146;
+  let directorX = 19;
+  try {
+    const { getDocumentProxy } = await import('unpdf');
+    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const textPage = await pdf.getPage(pages.length);
+    const content = await textPage.getTextContent();
+    for (const item of content.items || []) {
+      if (!/^director$/i.test(String(item.str || '').trim())) continue;
+      const tr = item.transform || [];
+      directorX = Number(tr[4]) || directorX;
+      directorY = Number(tr[5]) || directorY;
+      break;
+    }
+  } catch {
+    /* keep defaults */
+  }
+
+  const [sig, logoWithStamp, stamp] = await Promise.all([
+    loadImage(doc, company?.branding?.signatureUrl),
+    loadImage(doc, company?.branding?.logoWithStampUrl),
+    loadImage(doc, company?.branding?.stampUrl)
+  ]);
+  const seal = logoWithStamp || stamp;
+  const marginX = Math.max(18, directorX);
+
+  // Signature directly above the Director label (left).
+  if (sig) {
+    const d = sig.scaleToFit(128, 42);
+    page.drawImage(sig, {
+      x: marginX,
+      y: directorY + 18,
+      width: d.width,
+      height: d.height
+    });
+  }
+
+  // Logo + stamp on the opposite (right) side of the same closing band.
+  if (seal) {
+    const d = seal.scaleToFit(92, 92);
+    page.drawImage(seal, {
+      x: pageW - marginX - d.width,
+      y: Math.max(40, directorY - 10),
+      width: d.width,
+      height: d.height,
+      opacity: 0.95
+    });
+  }
+
+  fs.mkdirSync(destDir, { recursive: true });
+  const file = path.join(destDir, `appointment-sealed-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(file, await doc.save());
+  return relPath(file);
+};
+
 // --- Epic 17: fill an uploaded PDF's existing AcroForm fields, then flatten ---
+
+/**
+ * Fill {{placeholders}} in-place on an uploaded letter PDF.
+ * Each text run with placeholders is fully redrawn (static + bold values) so
+ * white cover boxes cannot punch holes into neighbouring letters.
+ * @returns {Promise<string|null>} repo-relative path, or null if no placeholders found
+ */
+export const fillTextPlaceholderPdf = async (
+  sourceRelPath,
+  fieldValues = {},
+  { destDir = GENERATED_DOC_DIR } = {}
+) => {
+  const sourceAbs = path.resolve(ROOT, sourceRelPath);
+  if (!fs.existsSync(sourceAbs)) throw new ApiError(404, 'Source PDF not found');
+
+  const { locatePlaceholderTextRuns } = await import('./placeholderDetectService.js');
+  const { resolveLetterField } = await import('../config/letterFields.js');
+  const { pageWidth, runs } = await locatePlaceholderTextRuns(sourceAbs);
+  if (!runs.length) return null;
+
+  const bytes = await fsp.readFile(sourceAbs);
+  const doc = await PDFDocument.load(bytes);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const pages = doc.getPages();
+  const ink = rgb(0.08, 0.08, 0.1);
+  const white = rgb(1, 1, 1);
+  const rightMargin = 18;
+
+  const widthOf = (text, size, useBold = false) =>
+    (useBold ? bold : font).widthOfTextAtSize(ascii(text), size);
+
+  const toSegments = (templateStr) => {
+    const parts = [];
+    const re = /\{\{\s*([^}]+?)\s*\}\}/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(templateStr))) {
+      if (m.index > last) parts.push({ text: templateStr.slice(last, m.index), bold: false });
+      const key = String(m[1] || '').trim();
+      const val = resolveLetterField(key, fieldValues);
+      parts.push({ text: val || `{{${key}}}`, bold: true });
+      last = m.index + m[0].length;
+    }
+    if (last < templateStr.length) parts.push({ text: templateStr.slice(last), bold: false });
+    return parts.filter((p) => p.text !== '');
+  };
+
+  const measure = (segments, size) =>
+    segments.reduce((w, seg) => w + widthOf(seg.text, size, seg.bold), 0);
+
+  const fitSize = (segments, maxWidth, desired) => {
+    let size = desired;
+    while (size > 7.5 && measure(segments, size) > maxWidth) size -= 0.3;
+    return size;
+  };
+
+  const wrapSegments = (segments, maxWidth, size) => {
+    const lines = [];
+    let line = [];
+    let lineW = 0;
+    const flush = () => {
+      if (line.length) lines.push(line);
+      line = [];
+      lineW = 0;
+    };
+    for (const seg of segments) {
+      for (const tok of String(seg.text).split(/(\s+)/)) {
+        if (!tok) continue;
+        const tw = widthOf(tok, size, seg.bold);
+        if (line.length && lineW + tw > maxWidth && !/^\s+$/.test(tok)) flush();
+        if (tw > maxWidth) {
+          let piece = tok;
+          while (piece.length) {
+            let fit = 1;
+            for (let n = 1; n <= piece.length; n += 1) {
+              if (widthOf(piece.slice(0, n), size, seg.bold) <= maxWidth) fit = n;
+              else break;
+            }
+            line.push({ text: piece.slice(0, fit), bold: seg.bold });
+            flush();
+            piece = piece.slice(fit);
+          }
+          continue;
+        }
+        line.push({ text: tok, bold: seg.bold });
+        lineW += tw;
+      }
+    }
+    flush();
+    return lines.length ? lines : [[{ text: '', bold: false }]];
+  };
+
+  for (const run of runs) {
+    const page = pages[run.pageIndex];
+    if (!page) continue;
+    const desiredSize = Math.max(8, Number(run.fontSize) || 12);
+    const template = String(run.str || '');
+    const segments = toSegments(template);
+    if (!segments.length) continue;
+
+    const looksRightAligned = run.x > pageWidth * 0.55 || /^date\s*:/i.test(template.trim());
+    const rightEdge = run.x + run.width;
+    const maxWidth = Math.max(60, pageWidth - (looksRightAligned ? rightMargin : run.x) - rightMargin);
+    const isPurePlaceholder = /^\{\{\s*[^}]+\s*\}\}$/.test(template.trim());
+
+    let size = desiredSize;
+    let lines;
+    if (isPurePlaceholder) {
+      lines = wrapSegments(segments, maxWidth, size);
+    } else {
+      size = fitSize(segments, maxWidth, desiredSize);
+      lines = measure(segments, size) > maxWidth
+        ? wrapSegments(segments, maxWidth, size)
+        : [segments];
+    }
+
+    const lineGap = size * 1.28;
+    const widest = Math.max(run.width, ...lines.map((ln) => measure(ln, size)));
+    const firstW = measure(lines[0], size);
+    const startX = looksRightAligned
+      ? Math.max(rightMargin, rightEdge - firstW)
+      : run.x;
+
+    // Cover the whole original run once — avoids mid-word white gaps.
+    page.drawRectangle({
+      x: Math.min(run.x, startX) - 1,
+      y: run.y - size * 0.28 - (lines.length - 1) * lineGap,
+      width: Math.max(widest, run.width) + 6,
+      height: lineGap * lines.length + size * 0.2,
+      color: white,
+      borderWidth: 0
+    });
+
+    let y = run.y;
+    for (const line of lines) {
+      let x = looksRightAligned
+        ? Math.max(rightMargin, rightEdge - measure(line, size))
+        : startX;
+      for (const seg of line) {
+        const t = ascii(seg.text);
+        if (!t) continue;
+        const f = seg.bold ? bold : font;
+        page.drawText(t, { x, y, size, font: f, color: ink });
+        x += f.widthOfTextAtSize(t, size);
+      }
+      y -= lineGap;
+    }
+  }
+
+  fs.mkdirSync(destDir, { recursive: true });
+  const file = path.join(destDir, `appointment-filled-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(file, await doc.save());
+  return relPath(file);
+};
 
 /**
  * Fill the existing form fields of an uploaded PDF and flatten it so values are

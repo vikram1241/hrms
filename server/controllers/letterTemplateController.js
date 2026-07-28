@@ -9,6 +9,7 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { LETTER_TEMPLATE_DIR, letterTemplateRelPath } from '../middleware/uploadLetterTemplate.js';
 import { fieldsForLetterType } from '../config/letterFields.js';
+import { extractLetterTemplateFromPdf } from '../services/placeholderDetectService.js';
 
 const present = (t) => {
   const o = t.toObject ? t.toObject() : { ...t };
@@ -17,6 +18,7 @@ const present = (t) => {
   const defaults = DEFAULT_LETTER_EMAIL[o.type] || {};
   o.emailSubject = o.emailSubject || defaults.subject || '';
   o.emailBody = o.emailBody || defaults.body || '';
+  o.detectedPlaceholders = Array.isArray(o.detectedPlaceholders) ? o.detectedPlaceholders : [];
   return o;
 };
 
@@ -28,6 +30,24 @@ const unlinkQuiet = async (rel) => {
 const parseBool = (v, fallback = false) => {
   if (v === undefined || v === null || v === '') return fallback;
   return v === true || v === 'true' || v === '1';
+};
+
+/**
+ * AppointmentLetter only: sync detected placeholders (+ body/title) from uploaded PDF.
+ * Other letter types leave body as the client sent it.
+ */
+const applyAppointmentPdfExtract = async (payload, fileRelPath, { overwriteBody = true } = {}) => {
+  if (payload.type !== 'AppointmentLetter' || !fileRelPath) return;
+  const extracted = await extractLetterTemplateFromPdf(fileRelPath);
+  payload.detectedPlaceholders = extracted.placeholders || [];
+  if (overwriteBody && extracted.bodyParagraphs?.length) {
+    payload.bodyParagraphs = extracted.bodyParagraphs;
+  }
+  if (overwriteBody && extracted.title) {
+    if (!(payload.title && String(payload.title).trim()) || payload.syncTitleFromPdf) {
+      payload.title = extracted.title;
+    }
+  }
 };
 
 /** Clear isDefault on other templates of the same type within the tenant. */
@@ -94,6 +114,7 @@ export const createLetterTemplate = asyncHandler(async (req, res) => {
     name,
     title,
     bodyParagraphs: bodyParagraphs.map((s) => String(s).trim()).filter(Boolean),
+    detectedPlaceholders: [],
     emailSubject,
     emailBody,
     isDefault,
@@ -103,6 +124,14 @@ export const createLetterTemplate = asyncHandler(async (req, res) => {
     payload.fileUrl = letterTemplateRelPath(req.file.filename);
     payload.originalFileName = req.file.originalname;
     payload.mimeType = req.file.mimetype || 'application/pdf';
+    // Appointment: prefer PDF-extracted body so generation matches the upload.
+    const clientBodyEmpty = !payload.bodyParagraphs.length;
+    await applyAppointmentPdfExtract(payload, payload.fileUrl, {
+      overwriteBody: type === 'AppointmentLetter' && (clientBodyEmpty || parseBool(req.body.syncBodyFromPdf, true))
+    });
+    if (type === 'AppointmentLetter' && !payload.title) {
+      payload.title = 'APPOINTMENT LETTER';
+    }
   }
 
   try {
@@ -144,6 +173,23 @@ export const updateLetterTemplate = asyncHandler(async (req, res) => {
     template.fileUrl = letterTemplateRelPath(req.file.filename);
     template.originalFileName = req.file.originalname;
     template.mimeType = req.file.mimetype || 'application/pdf';
+
+    if (template.type === 'AppointmentLetter') {
+      const syncBody = parseBool(req.body.syncBodyFromPdf, true);
+      const patch = {
+        type: template.type,
+        title: template.title,
+        bodyParagraphs: template.bodyParagraphs,
+        detectedPlaceholders: [],
+        syncTitleFromPdf: syncBody && !(req.body.title && String(req.body.title).trim())
+      };
+      await applyAppointmentPdfExtract(patch, template.fileUrl, { overwriteBody: syncBody });
+      template.detectedPlaceholders = patch.detectedPlaceholders || [];
+      if (syncBody && patch.bodyParagraphs?.length) {
+        template.bodyParagraphs = patch.bodyParagraphs;
+      }
+      if (patch.title) template.title = patch.title;
+    }
   }
 
   try {
