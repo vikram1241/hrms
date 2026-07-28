@@ -3,7 +3,9 @@ import tenantScope from './plugins/tenantScope.js';
 
 const PaySlipLineItemSchema = new mongoose.Schema({
   label: { type: String, required: true },
-  // Amount in paisa (integer).
+  /** Full-month amount in paisa (before LOP proration). */
+  fullAmount: { type: Number, default: 0 },
+  /** Payable amount in paisa for the period (after LOP / statutory). */
   amount: { type: Number, required: true }
 }, { _id: false });
 
@@ -18,9 +20,16 @@ const SalarySlipSchema = new mongoose.Schema({
     fullName: { type: String, required: true },
     designation: { type: String, required: true },
     department: { type: String, required: true },
+    joiningDate: { type: String, default: '' },
+    location: { type: String, default: '' },
+    bankName: { type: String, default: '' },
+    bankAccountNo: { type: String, default: '' },
+    bankAccountHidden: { type: String },
     pan: { type: String },
+    pfNumber: { type: String, default: '' },
     uan: { type: String },
-    bankAccountHidden: { type: String }
+    effectiveWorkDays: { type: Number, default: null },
+    lop: { type: Number, default: 0 }
   },
 
   earningsLedger: [PaySlipLineItemSchema],

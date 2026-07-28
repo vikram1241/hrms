@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { formatINR } from '../utils/money.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import ApiError from '../utils/ApiError.js';
+import { reconcileEarningsToCtc } from '../utils/salaryEngine.js';
 import { downscaleForPdfEmbed } from './brandingOptimize.js';
 
 const ROOT = process.cwd();
@@ -354,89 +355,251 @@ const amountCell = (paisa) => formatINR(paisa, { symbol: '', decimals: false }).
  * Render a SalarySlip document to a print-ready A4 PDF on the company page template.
  * @returns {Promise<string>} repo-relative path to the written file.
  */
+/**
+ * Payslip PDF matching Payslip template.png:
+ * - Company letter header (letterhead) top-left; address + month title top-right
+ * - Two-column employee details between thick rules
+ * - Salary table: Earnings | Full | Actual | Deductions | Actual
+ * - Totals + net pay + amount in words
+ * Filled values are bold.
+ */
 export const generatePayslipPdf = async (slip, company = null) => {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  // Always apply company letter template/outline + logo watermark on payslips.
-  const kit = await createCompanyPageKit(doc, company, { font, bold, alwaysWatermark: true });
-  const ink = rgb(0.1, 0.1, 0.1);
-  let { page, y } = kit.addDecoratedPage();
+  const page = doc.addPage([PAGE_W, PAGE_H]);
+  const ink = rgb(0.08, 0.08, 0.1);
+  const muted = rgb(0.25, 0.25, 0.28);
+  const MX = 36;
+  const contentW = PAGE_W - MX * 2;
+  const midX = PAGE_W / 2;
+  let y = PAGE_H - 36;
 
-  const ensure = (need = 40) => {
-    if (y < kit.contentBottomY + need) ({ page, y } = kit.addDecoratedPage());
+  const draw = (s, x, yy, opts = {}) => {
+    const t = ascii(s);
+    if (!t) return 0;
+    const f = opts.bold ? bold : font;
+    const size = opts.size ?? 9;
+    page.drawText(t, { x, y: yy, size, font: f, color: opts.color || ink });
+    return f.widthOfTextAtSize(t, size);
   };
 
-  const text = (s, x, opts = {}) => {
-    ensure((opts.size ?? 10) + 8);
-    page.drawText(ascii(s), {
-      x,
-      y: opts.y ?? y,
-      size: opts.size ?? 10,
-      font: opts.bold ? bold : font,
+  const drawRight = (s, rightX, yy, opts = {}) => {
+    const f = opts.bold ? bold : font;
+    const size = opts.size ?? 9;
+    const t = ascii(s);
+    const w = f.widthOfTextAtSize(t, size);
+    page.drawText(t, { x: rightX - w, y: yy, size, font: f, color: opts.color || ink });
+    return w;
+  };
+
+  const hLine = (yy, thickness = 1.6) => {
+    page.drawLine({
+      start: { x: MX, y: yy },
+      end: { x: PAGE_W - MX, y: yy },
+      thickness,
       color: ink
     });
   };
 
-  text(`Payslip for ${MONTHS[slip.month]} ${slip.year}`, kit.MARGIN_X, { size: 13, bold: true });
-  y -= 20;
+  const amt = (paisa) => formatINR(paisa ?? 0, { symbol: '', decimals: true });
+
+  // --- Header: company letter header (letterhead) left / address + title right ---
+  // Prefer "Company letter header" (letterheadUrl); fall back to logo only if missing.
+  let headerAsset = null;
+  const letterheadRel = company?.branding?.letterheadUrl;
+  if (letterheadRel) {
+    const outlineLike = await loadOutlinePage(doc, letterheadRel);
+    if (outlineLike?.kind === 'image') {
+      headerAsset = { kind: 'image', embedded: outlineLike.embedded };
+    } else if (outlineLike?.kind === 'pdf') {
+      headerAsset = { kind: 'pdf', embedded: outlineLike.embedded };
+    } else {
+      const img = await loadImage(doc, letterheadRel);
+      if (img) headerAsset = { kind: 'image', embedded: img };
+    }
+  }
+  if (!headerAsset) {
+    const img = await loadImage(doc, company?.branding?.logoUrl);
+    if (img) headerAsset = { kind: 'image', embedded: img };
+  }
+
+  const companyName = company?.name || 'Company';
+  const addr = company?.address || {};
+  const addrLines = [
+    companyName,
+    [addr.street, addr.city, addr.state].filter(Boolean).join(', '),
+    [addr.country || 'India', addr.zipCode].filter(Boolean).join(' ')
+  ].filter(Boolean);
+
+  if (headerAsset?.kind === 'image') {
+    const d = headerAsset.embedded.scaleToFit(220, 64);
+    page.drawImage(headerAsset.embedded, {
+      x: MX,
+      y: y - d.height + 8,
+      width: d.width,
+      height: d.height
+    });
+  } else if (headerAsset?.kind === 'pdf') {
+    // Letter header uploaded as PDF — draw page 1 cropped to a header band on the left.
+    const emb = headerAsset.embedded;
+    const maxW = 220;
+    const maxH = 64;
+    const scale = Math.min(maxW / emb.width, maxH / emb.height);
+    const dw = emb.width * scale;
+    const dh = emb.height * scale;
+    page.drawPage(emb, {
+      x: MX,
+      y: y - dh + 8,
+      width: dw,
+      height: dh
+    });
+  } else {
+    draw(companyName, MX, y - 8, { size: 14, bold: true, color: rgb(0.05, 0.15, 0.35) });
+  }
+
+  let ay = y - 2;
+  for (const line of addrLines) {
+    drawRight(line, PAGE_W - MX, ay, { size: 8, color: muted });
+    ay -= 11;
+  }
+  ay -= 6;
+  const title = `Payslip for the month of ${MONTHS[slip.month]} ${slip.year}`;
+  drawRight(title, PAGE_W - MX, ay, { size: 11, bold: true });
+
+  y = Math.min(headerAsset ? y - 72 : y - 40, ay - 18);
+
+  // --- Employee details (two columns) ---
+  hLine(y, 1.8);
+  y -= 14;
+  const meta = slip.metaSnapshot || {};
+  const leftRows = [
+    ['Name:', meta.fullName || '-'],
+    ['Joining Date:', meta.joiningDate || '-'],
+    ['Designation:', meta.designation || '-'],
+    ['Department:', meta.department || '-'],
+    ['Location:', meta.location || '-'],
+    ['Effective Work Days:', meta.effectiveWorkDays != null ? String(meta.effectiveWorkDays) : '-'],
+    ['LOP:', meta.lop != null ? String(meta.lop) : '0']
+  ];
+  const rightRows = [
+    ['Employee No:', meta.employeeDisplayId || '-'],
+    ['Bank Name:', meta.bankName || '-'],
+    ['Bank Account No:', meta.bankAccountNo || meta.bankAccountHidden || '-'],
+    ['PAN Number:', meta.pan || '-'],
+    ['PF No:', meta.pfNumber || '-'],
+    ['PF UAN:', meta.uan || '-']
+  ];
+
+  const rowStartY = y;
+  const labelW = 118;
+  const colPad = 8;
+  leftRows.forEach((row, i) => {
+    const yy = rowStartY - i * 14;
+    draw(row[0], MX, yy, { size: 9 });
+    draw(row[1], MX + labelW, yy, { size: 9, bold: true });
+  });
+  rightRows.forEach((row, i) => {
+    const yy = rowStartY - i * 14;
+    draw(row[0], midX + colPad, yy, { size: 9 });
+    draw(row[1], midX + colPad + labelW, yy, { size: 9, bold: true });
+  });
+
+  const blockH = Math.max(leftRows.length, rightRows.length) * 14;
+  // Vertical divider
   page.drawLine({
-    start: { x: kit.MARGIN_X, y: y + 6 },
-    end: { x: PAGE_W - kit.MARGIN_X, y: y + 6 },
-    thickness: 1,
+    start: { x: midX, y: rowStartY + 10 },
+    end: { x: midX, y: rowStartY - blockH + 4 },
+    thickness: 0.8,
     color: ink
   });
+
+  y = rowStartY - blockH - 6;
+  hLine(y, 1.8);
+  y -= 28;
+
+  // --- Salary table header ---
+  // Columns: Earnings | Full | Actual || Deductions | Actual
+  // Keep earnings Actual left of the mid divider; deductions start after it.
+  const splitX = midX;
+  const earnLabelX = MX;
+  const earnLabelMax = 98;
+  const earnFullRight = MX + 168;       // ~204
+  const earnActualRight = splitX - 10;  // ~287.5
+  const dedLabelX = splitX + 10;       // ~307.5
+  const dedLabelMax = 145;
+  const dedActualRight = PAGE_W - MX;  // ~559
+
+  const fitLabel = (raw, maxW, size = 9) => {
+    let t = ascii(String(raw || '').toUpperCase());
+    if (!t) return '';
+    if (font.widthOfTextAtSize(t, size) <= maxW) return t;
+    const ell = '...';
+    while (t.length > 1 && font.widthOfTextAtSize(t + ell, size) > maxW) {
+      t = t.slice(0, -1);
+    }
+    return t + ell;
+  };
+
+  hLine(y + 12, 1.5);
+  draw('Earnings', earnLabelX, y, { size: 10, bold: true });
+  drawRight('Full', earnFullRight, y, { size: 10, bold: true });
+  drawRight('Actual', earnActualRight, y, { size: 10, bold: true });
+  draw('Deductions', dedLabelX, y, { size: 10, bold: true });
+  drawRight('Actual', dedActualRight, y, { size: 10, bold: true });
+  y -= 6;
+  hLine(y, 1.5);
   y -= 16;
 
-  const meta = slip.metaSnapshot || {};
-  [
-    [`Employee: ${meta.fullName || '-'} (${meta.employeeDisplayId || '-'})`, `Department: ${meta.department || '-'}`],
-    [`Designation: ${meta.designation || '-'}`, `PAN: ${meta.pan || '-'}`],
-    [`UAN: ${meta.uan || '-'}`, `Bank A/C: ${meta.bankAccountHidden || '-'}`]
-  ].forEach((row) => {
-    text(row[0], kit.MARGIN_X);
-    text(row[1], 320);
-    y -= 18;
-  });
-
-  y -= 10;
-  ensure(80);
-  text('Earnings', kit.MARGIN_X, { bold: true });
-  text('Deductions', 320, { bold: true });
-  y -= 16;
-  const startY = y;
   const earnings = slip.earningsLedger || [];
   const deductions = slip.deductionsLedger || [];
-  earnings.forEach((e) => {
-    text(e.label, kit.MARGIN_X);
-    text(formatINR(e.amount), 230);
-    y -= 15;
-  });
-  const earningsEndY = y;
-  y = startY;
-  deductions.forEach((d) => {
-    text(d.label, 320);
-    text(formatINR(d.amount), 500);
-    y -= 15;
-  });
-  y = Math.min(earningsEndY, y) - 12;
+  const rows = Math.max(earnings.length, deductions.length, 1);
+  const tableTop = y + 10;
 
-  ensure(80);
+  for (let i = 0; i < rows; i += 1) {
+    if (y < 120) break;
+    const e = earnings[i];
+    const d = deductions[i];
+    if (e) {
+      draw(fitLabel(e.label, earnLabelMax), earnLabelX, y, { size: 9 });
+      drawRight(amt(e.fullAmount ?? e.amount), earnFullRight, y, { size: 9, bold: true });
+      drawRight(amt(e.amount), earnActualRight, y, { size: 9, bold: true });
+    }
+    if (d) {
+      draw(fitLabel(d.label, dedLabelMax), dedLabelX, y, { size: 9 });
+      drawRight(amt(d.amount), dedActualRight, y, { size: 9, bold: true });
+    }
+    y -= 15;
+  }
+
+  y -= 4;
+  hLine(y + 10, 1.5);
   page.drawLine({
-    start: { x: kit.MARGIN_X, y: y + 6 },
-    end: { x: PAGE_W - kit.MARGIN_X, y: y + 6 },
-    thickness: 0.5,
+    start: { x: splitX, y: tableTop },
+    end: { x: splitX, y: y + 10 },
+    thickness: 0.6,
     color: ink
   });
+
+  y -= 18;
   const summary = slip.financialSummary || {};
-  text(`Gross Earnings: ${formatINR(summary.grossEarnings || 0)}`, kit.MARGIN_X, { bold: true });
-  text(`Total Deductions: ${formatINR(summary.totalDeductions || 0)}`, 320, { bold: true });
-  y -= 22;
-  text(`Net Pay: ${formatINR(summary.netPay || 0)}`, kit.MARGIN_X, { size: 12, bold: true });
-  y -= 16;
-  text(`(${summary.netPayInWords || '-'})`, kit.MARGIN_X, { size: 9 });
-  y -= 30;
-  text('This is a system-generated payslip and does not require a signature.', kit.MARGIN_X, { size: 8 });
+  const totalEarn = summary.grossEarnings
+    ?? earnings.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalDed = summary.totalDeductions
+    ?? deductions.reduce((s, d) => s + (d.amount || 0), 0);
+  const net = summary.netPay ?? (totalEarn - totalDed);
+
+  draw(`Total Earnings: INR. ${amt(totalEarn)}`, earnLabelX, y, { size: 10, bold: true });
+  draw(`Total Deductions: INR. ${amt(totalDed)}`, dedLabelX, y, { size: 10, bold: true });
+  y -= 20;
+  draw(
+    `Net Pay for the month ( Total Earnings - Total Deductions): INR. ${amt(net)}`,
+    earnLabelX,
+    y,
+    { size: 10, bold: true }
+  );
+  y -= 18;
+  draw(`(${summary.netPayInWords || '-'})`, earnLabelX, y, { size: 9, bold: true });
 
   const empKey = slip.employeeId?._id || slip.employeeId || 'emp';
   const file = path.join(PAYSLIP_DIR, `payslip-${empKey}-${slip.year}-${String(slip.month).padStart(2, '0')}.pdf`);
@@ -661,32 +824,41 @@ export const generateOfferLetterPdf = async ({
   ], { size: 10, gap: 14 });
   y -= 8;
 
-  // Bordered salary breakdown table (earnings, all deductions, net take-home, CTC).
+  // Bordered salary breakdown table.
+  // Gross must equal monthly CTC (reconcile shortfalls left by fixed/% earnings).
+  // Net = Gross − Σ deduction lines (once). No separate "Total Deductions" row —
+  // that duplicated PF and looked like Gross − PF − Total Deduction.
   const monthlyCtc = Math.round(Number(annualCTC || 0) / 12);
+  const reconciled = reconcileEarningsToCtc(breakdown?.earnings || [], monthlyCtc);
+  const earnLines = reconciled.earnings;
+  const dedLines = breakdown?.deductions || [];
+  const grossPaisa = reconciled.grossEarnings
+    || Number(breakdown?.grossEarnings)
+    || 0;
+  const totalDedPaisa = dedLines.reduce((s, d) => s + (Number(d.monthlyAmount) || 0), 0);
+  const netPaisa = grossPaisa - totalDedPaisa;
+
   const salaryRows = [
-    ...(breakdown?.earnings || []).map((e) => ({
+    ...earnLines.map((e) => ({
       label: e.label,
       value: amountCell(e.monthlyAmount),
       bold: false
     })),
     {
       label: 'Gross Month Salary',
-      value: amountCell(breakdown?.grossEarnings || 0),
+      value: amountCell(grossPaisa),
       bold: true
     },
-    ...(breakdown?.deductions || []).map((d) => ({
+    ...dedLines.map((d) => ({
       label: d.label,
       value: amountCell(d.monthlyAmount),
       bold: false
     })),
     {
-      label: 'Total Deductions',
-      value: amountCell(breakdown?.totalDeductions || 0),
-      bold: true
-    },
-    {
-      label: 'Net Take Home (Monthly)',
-      value: amountCell(breakdown?.netTakeHome || 0),
+      label: dedLines.length
+        ? 'Net Take Home (Gross − Deductions)'
+        : 'Net Take Home (Monthly)',
+      value: amountCell(netPaisa),
       bold: true
     },
     {

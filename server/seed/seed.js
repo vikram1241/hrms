@@ -91,6 +91,13 @@ const TEMPLATES = [
 
 const createPayslip = async (user, assignment, month, year, company = null) => {
   const b = assignment.frozenMonthlyBreakdown;
+  const bank = user.employeeDetails?.bankDetails || {};
+  const join = user.employeeDetails?.dateOfJoining
+    ? new Date(user.employeeDetails.dateOfJoining)
+    : null;
+  const joiningDate = join && !Number.isNaN(join.getTime())
+    ? `${String(join.getDate()).padStart(2, '0')}-${String(join.getMonth() + 1).padStart(2, '0')}-${join.getFullYear()}`
+    : '';
   const data = {
     employeeId: user._id, month, year,
     metaSnapshot: {
@@ -98,12 +105,27 @@ const createPayslip = async (user, assignment, month, year, company = null) => {
       fullName: `${user.personalDetails.firstName} ${user.personalDetails.lastName}`,
       designation: user.employeeDetails.designation,
       department: user.employeeDetails.department,
+      joiningDate,
+      location: user.employeeDetails.workLocation || '',
+      bankName: bank.bankName || '',
+      bankAccountNo: bank.accountNumber || '',
+      bankAccountHidden: `****${String(bank.accountNumber || '').slice(-4)}`,
       pan: user.employeeDetails.panNumber,
+      pfNumber: '',
       uan: user.employeeDetails.uanNumber,
-      bankAccountHidden: `****${String(user.employeeDetails.bankDetails.accountNumber).slice(-4)}`
+      effectiveWorkDays: 30,
+      lop: 0
     },
-    earningsLedger: b.earnings.map((e) => ({ label: e.label, amount: e.monthlyAmount })),
-    deductionsLedger: b.deductions.map((d) => ({ label: d.label, amount: d.monthlyAmount })),
+    earningsLedger: b.earnings.map((e) => ({
+      label: e.label,
+      fullAmount: e.monthlyAmount,
+      amount: e.monthlyAmount
+    })),
+    deductionsLedger: b.deductions.map((d) => ({
+      label: d.label,
+      fullAmount: d.monthlyAmount,
+      amount: d.monthlyAmount
+    })),
     financialSummary: {
       grossEarnings: b.grossEarnings, totalDeductions: b.totalDeductions,
       netPay: b.netTakeHome, netPayInWords: paisaToWords(b.netTakeHome)

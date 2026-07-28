@@ -597,6 +597,15 @@ export const regenerateOffer = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Salary assignment missing — cannot regenerate offer PDF');
   }
 
+  // Re-freeze from the current salary template so Gross reconciles to monthly CTC
+  // (fixes older freezes where fixed/% earnings left a CTC gap ≈ PF).
+  const template = await SalaryStructureTemplate.findById(assignment.templateId);
+  if (template) {
+    const breakdown = computeBreakdown(template, assignment.annualCTC);
+    assignment.frozenMonthlyBreakdown = breakdown;
+    await assignment.save();
+  }
+
   const company = await Company.findById(offer.companyId);
   const letterTpl = await resolveDefaultLetterTemplate('OfferLetter');
   const previousPdf = offer.pdfFileUrl;

@@ -54,9 +54,49 @@ const computeBlock = (fields = [], monthlyCTC, basicAmount) => {
 
 const sum = (items) => items.reduce((s, i) => s + i.monthlyAmount, 0);
 
+const isAbsorbableEarning = (e) =>
+  /special|other|residual|flex|allowance/i.test(e.key || '')
+  || /special|other|residual|flexi/i.test(e.label || '');
+
+/**
+ * When fixed/% earnings leave a gap vs monthly CTC (no balance_of_ctc field),
+ * fold the shortfall into an allowance line so Gross === monthly CTC.
+ * Otherwise PF (etc.) looks double-counted: CTC−Gross≈PF and Net=Gross−PF.
+ */
+export const reconcileEarningsToCtc = (earnings, monthlyCTC) => {
+  const lines = (earnings || []).map((e) => ({ ...e, monthlyAmount: Number(e.monthlyAmount) || 0 }));
+  const gross = sum(lines);
+  const gap = Math.round(Number(monthlyCTC) || 0) - gross;
+  if (gap <= 0) return { earnings: lines, grossEarnings: gross };
+
+  const absorbIdx = lines.findIndex(isAbsorbableEarning);
+  if (absorbIdx >= 0) {
+    lines[absorbIdx] = {
+      ...lines[absorbIdx],
+      monthlyAmount: lines[absorbIdx].monthlyAmount + gap
+    };
+  } else if (lines.length) {
+    const last = lines.length - 1;
+    lines[last] = {
+      ...lines[last],
+      monthlyAmount: lines[last].monthlyAmount + gap
+    };
+  } else {
+    lines.push({
+      key: 'other_allowance',
+      label: 'Other Allowance',
+      monthlyAmount: gap
+    });
+  }
+  return { earnings: lines, grossEarnings: Math.round(Number(monthlyCTC) || 0) };
+};
+
 /**
  * Compute a frozen monthly salary breakdown for an employee from a template
  * and an annual CTC (both monetary inputs in paisa).
+ *
+ * Invariant: grossEarnings === monthly CTC (when CTC ≥ allocated earnings).
+ * Net take-home = grossEarnings − Σ deductions (once).
  *
  * @returns {{earnings, deductions, grossEarnings, totalDeductions, netTakeHome}}
  */
@@ -68,8 +108,16 @@ export const computeBreakdown = (template, annualCTCPaisa) => {
 
   const monthlyCTC = Math.round(annualCTCPaisa / 12);
 
-  const earnings = computeBlock(template.earningsStructure, monthlyCTC, 0);
-  const basic = earnings.find((e) => e.key === 'basic')?.monthlyAmount ?? 0;
+  let earnings = computeBlock(template.earningsStructure, monthlyCTC, 0);
+  const hasBalance = (template.earningsStructure || []).some(
+    (f) => f.calculationType === 'balance_of_ctc'
+  );
+  if (!hasBalance) {
+    ({ earnings } = reconcileEarningsToCtc(earnings, monthlyCTC));
+  }
+
+  const basic = earnings.find((e) => e.key === 'basic' || /^basic/i.test(e.key || e.label || ''))
+    ?.monthlyAmount ?? 0;
   const deductions = computeBlock(template.deductionsStructure, monthlyCTC, basic);
 
   const grossEarnings = sum(earnings);

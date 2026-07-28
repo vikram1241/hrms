@@ -18,7 +18,21 @@ const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
 
 const maskAccount = (acc) => (acc ? `****${String(acc).slice(-4)}` : '-');
 
-const ledgerFrom = (items) => items.map((i) => ({ label: i.label, amount: i.monthlyAmount }));
+const fmtJoinDate = (d) => {
+  if (!d) return '';
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return String(d);
+  const dd = String(x.getDate()).padStart(2, '0');
+  const mm = String(x.getMonth() + 1).padStart(2, '0');
+  return `${dd}-${mm}-${x.getFullYear()}`;
+};
+
+const prorate = (paisa, workDays, fullDays) => {
+  const full = Math.max(1, Number(fullDays) || 30);
+  const work = Math.min(full, Math.max(0, Number(workDays) || 0));
+  if (work >= full) return Math.round(Number(paisa) || 0);
+  return Math.round((Number(paisa) || 0) * (work / full));
+};
 
 /**
  * Build (or refresh) one employee's payslip for a period from their frozen
@@ -27,27 +41,59 @@ const ledgerFrom = (items) => items.map((i) => ({ label: i.label, amount: i.mont
 const buildSlip = async (assignment, month, year, notify, { applyStatutory = false, workingDays = 30 } = {}) => {
   const user = assignment.userId; // populated
   const b = assignment.frozenMonthlyBreakdown;
+  const fullDays = Math.max(1, Number(workingDays) || 30);
 
-  let deductionsLedger = ledgerFrom(b.deductions);
-  let totalDeductions = b.totalDeductions;
-  let netPay = b.netTakeHome;
+  const lop = await Attendance.countDocuments({
+    userId: user._id,
+    status: 'Absent',
+    date: {
+      $gte: new Date(Date.UTC(year, month - 1, 1)),
+      $lt: new Date(Date.UTC(year, month, 1))
+    }
+  });
+  const effectiveWorkDays = Math.max(0, fullDays - lop);
 
-  // Epic 16 — statutory run: recompute deductions (PF/ESI/PT/TDS) from earnings
-  // plus attendance-based LOP, replacing the template's static deductions.
+  const earningsLedger = (b.earnings || []).map((e) => {
+    const fullAmount = Math.round(Number(e.monthlyAmount) || 0);
+    return {
+      label: e.label,
+      fullAmount,
+      amount: prorate(fullAmount, effectiveWorkDays, fullDays)
+    };
+  });
+  const grossActual = earningsLedger.reduce((s, e) => s + e.amount, 0);
+
+  let deductionsLedger = (b.deductions || []).map((d) => {
+    const fullAmount = Math.round(Number(d.monthlyAmount) || 0);
+    return {
+      label: d.label,
+      fullAmount,
+      amount: fullAmount
+    };
+  });
+  let totalDeductions = deductionsLedger.reduce((s, d) => s + d.amount, 0);
+  let netPay = grossActual - totalDeductions;
+
+  // Epic 16 — statutory run: recompute deductions (PF/ESI/PT/TDS) from actual earnings.
   if (applyStatutory) {
-    const basic = (b.earnings.find((e) => /basic/i.test(e.key || e.label))?.monthlyAmount) || 0;
-    const absentDays = await Attendance.countDocuments({
-      userId: user._id, status: 'Absent',
-      date: { $gte: new Date(Date.UTC(year, month - 1, 1)), $lt: new Date(Date.UTC(year, month, 1)) }
-    });
+    const basicFull = (b.earnings.find((e) => /basic/i.test(e.key || e.label))?.monthlyAmount) || 0;
+    const basicActual = prorate(basicFull, effectiveWorkDays, fullDays);
     const { deductions } = computeStatutoryDeductions({
-      basicPaisa: basic, grossPaisa: b.grossEarnings, absentDays, workingDays
+      basicPaisa: basicActual,
+      grossPaisa: grossActual,
+      absentDays: lop,
+      workingDays: fullDays
     });
-    deductionsLedger = deductions;
-    totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
-    netPay = b.grossEarnings - totalDeductions;
+    deductionsLedger = deductions.map((d) => ({
+      label: d.label,
+      fullAmount: d.amount,
+      amount: d.amount
+    }));
+    totalDeductions = deductionsLedger.reduce((s, d) => s + d.amount, 0);
+    netPay = grossActual - totalDeductions;
   }
 
+  const bank = user.employeeDetails?.bankDetails || {};
   const slipData = {
     employeeId: user._id,
     month,
@@ -57,14 +103,21 @@ const buildSlip = async (assignment, month, year, notify, { applyStatutory = fal
       fullName: `${user.personalDetails.firstName} ${user.personalDetails.lastName}`,
       designation: user.employeeDetails?.designation || 'N/A',
       department: user.employeeDetails?.department || 'N/A',
-      pan: user.employeeDetails?.panNumber,
-      uan: user.employeeDetails?.uanNumber,
-      bankAccountHidden: maskAccount(user.employeeDetails?.bankDetails?.accountNumber)
+      joiningDate: fmtJoinDate(user.employeeDetails?.dateOfJoining),
+      location: user.employeeDetails?.workLocation || '',
+      bankName: bank.bankName || '',
+      bankAccountNo: bank.accountNumber || '',
+      bankAccountHidden: maskAccount(bank.accountNumber),
+      pan: user.employeeDetails?.panNumber || '',
+      pfNumber: '',
+      uan: user.employeeDetails?.uanNumber || '',
+      effectiveWorkDays,
+      lop
     },
-    earningsLedger: ledgerFrom(b.earnings),
+    earningsLedger,
     deductionsLedger,
     financialSummary: {
-      grossEarnings: b.grossEarnings,
+      grossEarnings: grossActual,
       totalDeductions,
       netPay,
       netPayInWords: paisaToWords(netPay)
@@ -72,7 +125,6 @@ const buildSlip = async (assignment, month, year, notify, { applyStatutory = fal
     paymentStatus: 'Paid'
   };
 
-  // Render PDF on the company page template (letter outline when configured).
   const company = await Company.findById(user.companyId);
   const pdfUrl = await generatePayslipPdf(slipData, company);
   slipData.pdfUrl = pdfUrl;
