@@ -54,14 +54,12 @@ const computeBlock = (fields = [], monthlyCTC, basicAmount) => {
 
 const sum = (items) => items.reduce((s, i) => s + i.monthlyAmount, 0);
 
-const isAbsorbableEarning = (e) =>
-  /special|other|residual|flex|allowance/i.test(e.key || '')
-  || /special|other|residual|flexi/i.test(e.label || '');
-
 /**
- * When fixed/% earnings leave a gap vs monthly CTC (no balance_of_ctc field),
- * fold the shortfall into an allowance line so Gross === monthly CTC.
- * Otherwise PF (etc.) looks double-counted: CTC−Gross≈PF and Net=Gross−PF.
+ * When fixed/% earnings leave a gap vs monthly CTC (and the template has no
+ * balance_of_ctc field), append a separate balancing line so Gross === monthly CTC.
+ *
+ * Never mutate existing lines — fixed amounts (e.g. Phone Allowance ₹500) must
+ * stay exactly as configured in the salary template.
  */
 export const reconcileEarningsToCtc = (earnings, monthlyCTC) => {
   const lines = (earnings || []).map((e) => ({ ...e, monthlyAmount: Number(e.monthlyAmount) || 0 }));
@@ -69,22 +67,16 @@ export const reconcileEarningsToCtc = (earnings, monthlyCTC) => {
   const gap = Math.round(Number(monthlyCTC) || 0) - gross;
   if (gap <= 0) return { earnings: lines, grossEarnings: gross };
 
-  const absorbIdx = lines.findIndex(isAbsorbableEarning);
-  if (absorbIdx >= 0) {
-    lines[absorbIdx] = {
-      ...lines[absorbIdx],
-      monthlyAmount: lines[absorbIdx].monthlyAmount + gap
-    };
-  } else if (lines.length) {
-    const last = lines.length - 1;
-    lines[last] = {
-      ...lines[last],
-      monthlyAmount: lines[last].monthlyAmount + gap
+  const already = lines.findIndex((e) => e.key === 'balancing_allowance');
+  if (already >= 0) {
+    lines[already] = {
+      ...lines[already],
+      monthlyAmount: lines[already].monthlyAmount + gap
     };
   } else {
     lines.push({
-      key: 'other_allowance',
-      label: 'Other Allowance',
+      key: 'balancing_allowance',
+      label: 'Balancing Allowance',
       monthlyAmount: gap
     });
   }

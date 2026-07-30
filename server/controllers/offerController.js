@@ -120,6 +120,16 @@ const createOfferCore = async (payload, { sendEmail = true } = {}) => {
   const template = await resolveTemplate(payload);
   const user = await upsertCandidateUser({ email: candidateEmail, fullName });
 
+  // Persist offer phone onto the candidate when profile still has the placeholder.
+  const offerPhone = String(payload.phone || '').trim();
+  if (offerPhone) {
+    const current = String(user.contactInfo?.personalMobile || '').replace(/\D/g, '');
+    if (!current || /^0+$/.test(current)) {
+      user.contactInfo.personalMobile = offerPhone;
+      await user.save();
+    }
+  }
+
   const annualCTCPaisa = rupeesToPaisa(annualCTC);
   const breakdown = computeBreakdown(template, annualCTCPaisa);
 
@@ -534,6 +544,9 @@ export const generateAppointmentLetter = asyncHandler(async (req, res) => {
     companyId: offer.companyId,
     annualCTCPaisa: offer.salaryAssignmentId?.annualCTC,
     location: reportingArea,
+    // Fallback when user profile still has placeholder phone/address.
+    offerPhone: offer.phone || '',
+    offerAddress: offer.city || '',
     queueEmail: true
   });
 

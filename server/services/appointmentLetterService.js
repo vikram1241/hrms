@@ -51,22 +51,49 @@ const honorificOf = (user) => {
   return '';
 };
 
-/** Split address into Harish-style lines (street parts, locality, city + PIN). */
-const addressLinesOf = (user) => {
-  const a = user.contactInfo?.presentAddress || user.contactInfo?.permanentAddress;
-  if (!a) return [];
+/** True for empty / all-zero candidate placeholders (e.g. 0000000000). */
+export const isPlaceholderPhone = (raw) => {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  return !digits || /^0+$/.test(digits);
+};
+
+/** True for upsertCandidateUser placeholder addresses (Pending / PIN 000000). */
+export const isPlaceholderAddress = (a) => {
+  if (!a || typeof a !== 'object') return true;
+  const street = String(a.street || a.line1 || '').trim().toLowerCase();
+  const city = String(a.city || '').trim().toLowerCase();
+  const pin = String(a.zipCode || a.pincode || a.pin || '').trim();
+  if (!street && !city) return true;
+  if (street === 'pending' || city === 'pending') return true;
+  if (pin && /^0+$/.test(pin) && (street === 'pending' || !street || city === 'pending')) return true;
+  return false;
+};
+
+/**
+ * Phone for appointment letter.
+ * Prefer real user mobile (skip 0000000000 placeholders), then offer phone.
+ */
+export const resolveAppointmentPhone = ({ offerPhone, user } = {}) => {
+  const personal = user?.contactInfo?.personalMobile;
+  if (personal && !isPlaceholderPhone(personal)) return String(personal).trim();
+  const work = user?.contactInfo?.workMobile;
+  if (work && !isPlaceholderPhone(work)) return String(work).trim();
+  const fromOffer = String(offerPhone ?? '').trim();
+  if (fromOffer && !isPlaceholderPhone(fromOffer)) return fromOffer;
+  return '';
+};
+
+/** Build display lines from a structured user address object. */
+const linesFromAddressObject = (a) => {
+  if (!a || isPlaceholderAddress(a)) return [];
   const lines = [];
   const street = String(a.street || a.line1 || '').trim();
   if (street.includes('\n')) {
     for (const ln of street.split(/\n+/).map((s) => s.trim()).filter(Boolean)) lines.push(ln);
   } else if (street.includes(',')) {
-    // "H.no; 3-3-458/3, Gayathri Nagar" → two lines when useful
     const parts = street.split(',').map((s) => s.trim()).filter(Boolean);
-    if (parts.length >= 2 && parts[0].length < 48) {
-      lines.push(...parts);
-    } else {
-      lines.push(street);
-    }
+    if (parts.length >= 2 && parts[0].length < 48) lines.push(...parts);
+    else lines.push(street);
   } else if (street) {
     lines.push(street);
   }
@@ -74,11 +101,32 @@ const addressLinesOf = (user) => {
   if (a.area || a.locality) lines.push(String(a.area || a.locality).trim());
   const city = String(a.city || '').trim();
   const pin = a.zipCode || a.pincode || a.pin;
-  if (city && pin) lines.push(`${city}, PIN Code: ${pin}`);
+  if (city && pin && !/^0+$/.test(String(pin))) lines.push(`${city}, PIN Code: ${pin}`);
   else if (city && a.state) lines.push([city, a.state].filter(Boolean).join(', '));
   else if (city) lines.push(city);
-  else if (pin) lines.push(`PIN Code: ${pin}`);
+  else if (pin && !/^0+$/.test(String(pin))) lines.push(`PIN Code: ${pin}`);
   return lines.filter(Boolean);
+};
+
+/**
+ * Address for appointment letter.
+ * Prefer real user address, then offer City/Address free-text.
+ * If nothing usable → ['-'].
+ */
+export const resolveAppointmentAddressLines = ({ offerAddress, user } = {}) => {
+  const fromUser = linesFromAddressObject(
+    user?.contactInfo?.presentAddress || user?.contactInfo?.permanentAddress
+  );
+  if (fromUser.length) return fromUser;
+
+  const fromOffer = String(offerAddress ?? '').trim();
+  if (fromOffer && fromOffer !== '-') {
+    return fromOffer.includes('\n')
+      ? fromOffer.split(/\n+/).map((s) => s.trim()).filter(Boolean)
+      : [fromOffer];
+  }
+
+  return ['-'];
 };
 
 /** Download / email filename like Harish-appointment.pdf */
@@ -92,6 +140,9 @@ export const appointmentFileName = (employeeName) => {
  * Build PDF for an appointment letter.
  * Uses the default AppointmentLetter template when present (uploaded PDF body /
  * AcroForm / bodyParagraphs). Falls back to the legacy Harish layout otherwise.
+ *
+ * @param {string} [offerPhone]     Offer phone — used only if user mobile is missing/placeholder
+ * @param {string} [offerAddress]   Offer city/address — used only if user address is missing/placeholder
  */
 export const buildAppointmentLetterPdf = async ({
   user,
@@ -100,7 +151,9 @@ export const buildAppointmentLetterPdf = async ({
   effectiveDate,
   department,
   location,
-  annualCTCPaisa
+  annualCTCPaisa,
+  offerPhone = '',
+  offerAddress = ''
 }) => {
   const employeeName = fullNameOf(user);
   const firstName = user.personalDetails?.firstName || employeeName.split(/\s+/)[0] || employeeName;
@@ -108,10 +161,10 @@ export const buildAppointmentLetterPdf = async ({
   const effDate = effectiveDate || user.employeeDetails?.dateOfJoining || new Date();
   const joinStr = fmtAppointmentDate(effDate);
   const companyName = company?.name || 'Company';
-  const phone = user.contactInfo?.personalMobile || user.contactInfo?.workMobile || '';
+  const phone = resolveAppointmentPhone({ offerPhone, user });
   // Only non-empty reporting area is rendered on the PDF ("Your assigned reporting area…").
   const loc = String(location ?? user.employeeDetails?.workLocation ?? '').trim();
-  const addressLines = addressLinesOf(user);
+  const addressLines = resolveAppointmentAddressLines({ offerAddress, user });
   const address = addressLines.join(', ');
   const honorific = honorificOf(user);
   const trainingVenue = 'Vivanta, Begumpet, Hyderabad';
@@ -133,16 +186,16 @@ export const buildAppointmentLetterPdf = async ({
     companyName,
     location: loc,
     Location: loc,
-    phone,
-    Phone: phone,
-    Mobile: phone,
+    phone: phone || '-',
+    Phone: phone || '-',
+    Mobile: phone || '-',
     email,
     Email: email,
-    address,
-    Address: address,
-    addressLine1: addressLines[0] || address,
+    address: address || '-',
+    Address: address || '-',
+    addressLine1: addressLines[0] || '-',
     addressLine2: addressLines[1] || '',
-    addressCityLine: addressLines[addressLines.length - 1] || '',
+    addressCityLine: addressLines.length > 1 ? addressLines[addressLines.length - 1] : '',
     ctc: annualCTCPaisa != null ? formatINR(annualCTCPaisa) : '',
     trainingVenue,
     joiningTime,
@@ -171,7 +224,7 @@ export const buildAppointmentLetterPdf = async ({
       letterDate: joinStr,
       location: loc,
       addressLines,
-      phone,
+      phone: phone || '-',
       trainingVenue,
       joiningTime,
       honorific
@@ -207,6 +260,8 @@ export const issueAndEmailAppointmentLetter = async ({
   companyId,
   annualCTCPaisa,
   location,
+  offerPhone = '',
+  offerAddress = '',
   queueEmail = true
 }) => {
   const company = await Company.findById(companyId || user.companyId);
@@ -217,7 +272,9 @@ export const issueAndEmailAppointmentLetter = async ({
     effectiveDate,
     department,
     location,
-    annualCTCPaisa
+    annualCTCPaisa,
+    offerPhone,
+    offerAddress
   });
 
   const doc = await EmployeeDocument.create({

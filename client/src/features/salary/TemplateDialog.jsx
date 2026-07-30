@@ -56,13 +56,15 @@ const basicAmountOf = (earnings) => {
 
 const amountFromPercent = (type, percent, monthlyCtc, basicAmt) => {
   const p = num(percent);
-  if (type === 'percentage_of_ctc' || type === 'fixed') return round2((monthlyCtc * p) / 100);
+  if (type === 'percentage_of_ctc') return round2((monthlyCtc * p) / 100);
   if (type === 'percentage_of_basic') return round2((basicAmt * p) / 100);
+  // fixed amounts are absolute — never derive from CTC %
   return 0;
 };
 
 const percentFromAmount = (type, amount, monthlyCtc, basicAmt) => {
   const a = num(amount);
+  if (type === 'fixed') return '';
   if (type === 'percentage_of_basic') {
     if (basicAmt <= 0) return 0;
     return round2((a / basicAmt) * 100);
@@ -71,10 +73,11 @@ const percentFromAmount = (type, amount, monthlyCtc, basicAmt) => {
   return round2((a / monthlyCtc) * 100);
 };
 
-/** Apply % → amount for all rows given CTC / basic. */
+/** Apply % → amount for %-based rows given CTC / basic. Fixed rows keep their amount. */
 const syncAmounts = (rows, monthlyCtc, basicAmt) =>
   (rows || []).map((r) => {
     if (r.calculationType === 'balance_of_ctc') return { ...r, percent: '', amount: '' };
+    if (r.calculationType === 'fixed') return { ...r, percent: '' };
     if (r.percent === '' || r.percent == null) return r;
     return {
       ...r,
@@ -118,6 +121,9 @@ function RowEditor({
     if (calculationType === 'balance_of_ctc') {
       return updateAt(i, { calculationType, percent: '', amount: '' });
     }
+    if (calculationType === 'fixed') {
+      return updateAt(i, { calculationType, percent: '', amount: r.amount });
+    }
     let percent = r.percent;
     let amount = r.amount;
     if (percent !== '' && percent != null) {
@@ -130,7 +136,7 @@ function RowEditor({
 
   const onPercent = (i, raw) => {
     const r = rows[i];
-    if (r.calculationType === 'balance_of_ctc') return;
+    if (r.calculationType === 'balance_of_ctc' || r.calculationType === 'fixed') return;
     if (raw === '') return updateAt(i, { percent: '', amount: '' });
     const amount = amountFromPercent(r.calculationType, raw, monthlyCtc, basicAmt);
     updateAt(i, { percent: raw, amount });
@@ -139,6 +145,9 @@ function RowEditor({
   const onAmount = (i, raw) => {
     const r = rows[i];
     if (r.calculationType === 'balance_of_ctc') return;
+    if (r.calculationType === 'fixed') {
+      return updateAt(i, { amount: raw, percent: '' });
+    }
     if (raw === '') return updateAt(i, { amount: '', percent: '' });
     const percent = percentFromAmount(r.calculationType, raw, monthlyCtc, basicAmt);
     updateAt(i, { amount: raw, percent });
@@ -167,6 +176,7 @@ function RowEditor({
         )}
         {rows.map((r, i) => {
           const locked = r.calculationType === 'balance_of_ctc';
+          const isFixed = r.calculationType === 'fixed';
           const inputsDisabled = locked || monthlyCtc <= 0;
           return (
             <div key={i} className="grid grid-cols-12 items-start gap-2">
@@ -197,7 +207,7 @@ function RowEditor({
                 label="%"
                 value={r.percent}
                 onChange={(e) => onPercent(i, e.target.value)}
-                disabled={inputsDisabled}
+                disabled={inputsDisabled || isFixed}
                 inputProps={{ min: 0, step: '0.01' }}
               />
               <TextField
@@ -268,16 +278,10 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
     if (monthly <= 0) return;
 
     setEarnings((prev) => {
-      // First pass: non-basic-% rows (so Basic amount exists), then % of Basic.
-      const pass1 = syncAmounts(
-        prev.map((r) => (r.calculationType === 'percentage_of_basic' ? r : r)),
-        monthly,
-        0
-      ).map((r) => {
-        if (r.calculationType === 'percentage_of_basic') return r;
-        if (r.calculationType === 'fixed' && (r.percent === '' || r.percent == null) && r.amount !== '') {
-          return { ...r, percent: percentFromAmount('fixed', r.amount, monthly, 0) };
-        }
+      // First pass: % of CTC (fixed amounts stay absolute), then % of Basic.
+      const pass1 = syncAmounts(prev, monthly, 0).map((r) => {
+        if (r.calculationType === 'percentage_of_basic' || r.calculationType === 'fixed') return r;
+        if (r.calculationType === 'balance_of_ctc') return r;
         if (r.percent === '' || r.percent == null) return r;
         return {
           ...r,
@@ -296,14 +300,9 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
     });
 
     setDeductions((prev) => {
-      // basic from earnings state may be one tick behind; recompute from earnings after setState is async —
-      // use current earnings + the CTC we just applied for % of CTC / fixed; for % of basic use current basicAmt.
       const basic = basicAmountOf(earnings);
       return prev.map((r) => {
-        if (r.calculationType === 'balance_of_ctc') return r;
-        if (r.calculationType === 'fixed' && (r.percent === '' || r.percent == null) && r.amount !== '') {
-          return { ...r, percent: percentFromAmount('fixed', r.amount, monthly, basic) };
-        }
+        if (r.calculationType === 'balance_of_ctc' || r.calculationType === 'fixed') return r;
         if (r.percent === '' || r.percent == null) return r;
         return {
           ...r,

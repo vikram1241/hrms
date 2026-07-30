@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import EmployeeDocument, { GENERATED_DOC_TYPES } from '../models/EmployeeDocument.js';
 import User from '../models/User.js';
 import Company from '../models/Company.js';
+import OfferLetter from '../models/OfferLetter.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { generateCompanyDocPdf, bakeSignatureOnDoc } from '../services/pdfService.js';
@@ -75,13 +76,19 @@ export const issueDocument = asyncHandler(async (req, res) => {
 
   if (type === 'AppointmentLetter') {
     const reporting = String(location || reportingArea || user.employeeDetails?.workLocation || '').trim();
+    const offer = await OfferLetter.findOne({
+      candidateEmail: user.email,
+      companyId: user.companyId
+    }).sort({ offerDate: -1, createdAt: -1 }).select('phone city location');
     const built = await buildAppointmentLetterPdf({
       user,
       company,
       designation: ctx.designation,
       effectiveDate: ctx.effectiveDate,
       department: user.employeeDetails?.department,
-      location: reporting
+      location: reporting || offer?.location || '',
+      offerPhone: offer?.phone || '',
+      offerAddress: offer?.city || ''
     });
     pdfFileUrl = built.pdfFileUrl;
     title = built.title;
