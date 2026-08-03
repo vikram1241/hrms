@@ -142,6 +142,9 @@ export const setupPassword = asyncHandler(async (req, res) => {
     'passwordSetup.expiresAt': { $gt: new Date() }
   });
   if (!user) throw new ApiError(401, 'This setup link is invalid or has expired');
+  if (user.deletedAt) {
+    throw new ApiError(403, 'This account has been deleted. Contact your administrator.');
+  }
 
   user.password = password; // hashed by pre-save hook
   user.isActive = true;

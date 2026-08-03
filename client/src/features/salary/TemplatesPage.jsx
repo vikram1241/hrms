@@ -128,7 +128,7 @@ export default function TemplatesPage() {
       <ConfirmDialog
         open={Boolean(deactivateTarget)} onClose={() => setDeactivateTarget(null)} onConfirm={onDeactivate} loading={busy}
         title="Deactivate template?" confirmLabel="Deactivate"
-        message="It will no longer be selectable for new assignments. Existing assignments keep their frozen breakdown."
+        message="It will no longer be selectable for new assignments. Deactivation is blocked if any employee still has this template assigned — reassign them first."
       />
     </div>
   );

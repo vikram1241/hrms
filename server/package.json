@@ -29,7 +29,8 @@
     "nodemailer": "^6.9.16",
     "pdf-lib": "^1.17.1",
     "sharp": "^0.34.5",
-    "unpdf": "^1.8.0"
+    "unpdf": "^1.8.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "mongodb-memory-server": "^10.1.2",

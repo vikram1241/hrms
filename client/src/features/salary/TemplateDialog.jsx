@@ -31,11 +31,20 @@ const ensureUniqueKeys = (rows) => {
   });
 };
 
+const SPECIAL_ALLOWANCE = {
+  label: 'Special Allowance',
+  calculationType: 'balance_of_ctc',
+  percent: '',
+  amount: '',
+  lockedBalance: true
+};
+
 const emptyRow = () => ({
   label: '',
   calculationType: 'percentage_of_ctc',
   percent: '',
-  amount: ''
+  amount: '',
+  lockedBalance: false
 });
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
@@ -44,10 +53,14 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const fmtInr = (n) => round2(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
 const isBasicRow = (r) => {
   const k = keyFromLabel(r.label);
   return k === 'basic' || k === 'basic_pay' || /^basic/.test(k);
 };
+
+const isBalanceRow = (r) => r.calculationType === 'balance_of_ctc' || r.lockedBalance;
 
 const basicAmountOf = (earnings) => {
   const row = (earnings || []).find(isBasicRow);
@@ -58,7 +71,6 @@ const amountFromPercent = (type, percent, monthlyCtc, basicAmt) => {
   const p = num(percent);
   if (type === 'percentage_of_ctc') return round2((monthlyCtc * p) / 100);
   if (type === 'percentage_of_basic') return round2((basicAmt * p) / 100);
-  // fixed amounts are absolute — never derive from CTC %
   return 0;
 };
 
@@ -73,10 +85,10 @@ const percentFromAmount = (type, amount, monthlyCtc, basicAmt) => {
   return round2((a / monthlyCtc) * 100);
 };
 
-/** Apply % → amount for %-based rows given CTC / basic. Fixed rows keep their amount. */
+/** Apply % → amount for %-based rows. Fixed / balance rows keep their semantics. */
 const syncAmounts = (rows, monthlyCtc, basicAmt) =>
   (rows || []).map((r) => {
-    if (r.calculationType === 'balance_of_ctc') return { ...r, percent: '', amount: '' };
+    if (isBalanceRow(r)) return { ...r, calculationType: 'balance_of_ctc', percent: '', amount: '' };
     if (r.calculationType === 'fixed') return { ...r, percent: '' };
     if (r.percent === '' || r.percent == null) return r;
     return {
@@ -85,23 +97,74 @@ const syncAmounts = (rows, monthlyCtc, basicAmt) =>
     };
   });
 
-const rowsFromStructure = (structure) =>
-  (structure || []).map((row) => {
+/** Ensure exactly one Special Allowance (Balance of CTC) row at the end. */
+const ensureSpecialAllowance = (rows = []) => {
+  const others = rows.filter((r) => !isBalanceRow(r));
+  const existing = rows.find(isBalanceRow);
+  const special = {
+    ...SPECIAL_ALLOWANCE,
+    label: existing?.label?.trim() || SPECIAL_ALLOWANCE.label
+  };
+  return [...others, special];
+};
+
+const mapStructureRows = (structure, { asEarnings = false } = {}) => {
+  const mapped = (structure || []).map((row) => {
     const type = row.calculationType || 'percentage_of_ctc';
     if (type === 'fixed') {
       const amount = round2(num(row.valueFactor) / 100);
-      return { label: row.label || '', calculationType: type, percent: '', amount };
+      return { label: row.label || '', calculationType: type, percent: '', amount, lockedBalance: false };
     }
     if (type === 'balance_of_ctc') {
-      return { label: row.label || '', calculationType: type, percent: '', amount: '' };
+      return {
+        label: row.label || SPECIAL_ALLOWANCE.label,
+        calculationType: type,
+        percent: '',
+        amount: '',
+        lockedBalance: Boolean(asEarnings)
+      };
     }
     return {
       label: row.label || '',
       calculationType: type,
       percent: num(row.valueFactor),
-      amount: ''
+      amount: '',
+      lockedBalance: false
     };
   });
+  if (!asEarnings) return mapped.filter((r) => !isBalanceRow(r));
+  return ensureSpecialAllowance(mapped);
+};
+
+/** Live CTC allocation summary for earnings (balance row excluded from allocated). */
+export const summarizeEarningsVsCtc = (earnings, monthlyCtc) => {
+  const monthly = num(monthlyCtc);
+  const nonBalance = (earnings || []).filter((r) => !isBalanceRow(r));
+  const allocated = round2(nonBalance.reduce((s, r) => s + num(r.amount), 0));
+  const ctcPercentSum = round2(
+    nonBalance
+      .filter((r) => r.calculationType === 'percentage_of_ctc')
+      .reduce((s, r) => s + num(r.percent), 0)
+  );
+  const remaining = round2(monthly - allocated);
+  const overBy = remaining < 0 ? round2(Math.abs(remaining)) : 0;
+  const status = monthly <= 0
+    ? 'idle'
+    : remaining < -0.009
+      ? 'over'
+      : remaining <= 0.009
+        ? 'exact'
+        : 'under';
+  return {
+    monthly,
+    allocated,
+    remaining: Math.max(remaining, 0),
+    overBy,
+    ctcPercentSum,
+    status,
+    specialAmount: Math.max(remaining, 0)
+  };
+};
 
 function RowEditor({
   title,
@@ -110,7 +173,10 @@ function RowEditor({
   monthlyCtc,
   basicAmt,
   canAdd,
-  addHint
+  addHint,
+  showBalanceAmount = false,
+  balanceAmount = 0,
+  allowRemoveBalance = false
 }) {
   const updateAt = (i, patch) => {
     onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -118,8 +184,17 @@ function RowEditor({
 
   const onType = (i, calculationType) => {
     const r = rows[i];
+    if (r.lockedBalance) return; // Special Allowance type is fixed
     if (calculationType === 'balance_of_ctc') {
-      return updateAt(i, { calculationType, percent: '', amount: '' });
+      // Only one balance row — convert this row and drop others' balance type
+      const next = rows.map((row, idx) => {
+        if (idx === i) return { ...row, calculationType, percent: '', amount: '', lockedBalance: true };
+        if (isBalanceRow(row)) {
+          return { ...row, calculationType: 'percentage_of_ctc', lockedBalance: false };
+        }
+        return row;
+      });
+      return onChange(ensureSpecialAllowance(next));
     }
     if (calculationType === 'fixed') {
       return updateAt(i, { calculationType, percent: '', amount: r.amount });
@@ -136,7 +211,7 @@ function RowEditor({
 
   const onPercent = (i, raw) => {
     const r = rows[i];
-    if (r.calculationType === 'balance_of_ctc' || r.calculationType === 'fixed') return;
+    if (isBalanceRow(r) || r.calculationType === 'fixed') return;
     if (raw === '') return updateAt(i, { percent: '', amount: '' });
     const amount = amountFromPercent(r.calculationType, raw, monthlyCtc, basicAmt);
     updateAt(i, { percent: raw, amount });
@@ -144,7 +219,7 @@ function RowEditor({
 
   const onAmount = (i, raw) => {
     const r = rows[i];
-    if (r.calculationType === 'balance_of_ctc') return;
+    if (isBalanceRow(r)) return;
     if (r.calculationType === 'fixed') {
       return updateAt(i, { amount: raw, percent: '' });
     }
@@ -152,6 +227,8 @@ function RowEditor({
     const percent = percentFromAmount(r.calculationType, raw, monthlyCtc, basicAmt);
     updateAt(i, { amount: raw, percent });
   };
+
+  const typeOptions = CALC_TYPES.filter((c) => c.value !== 'balance_of_ctc');
 
   return (
     <div>
@@ -162,7 +239,10 @@ function RowEditor({
           className="btn-secondary btn-sm"
           disabled={!canAdd}
           title={canAdd ? 'Add field' : addHint}
-          onClick={() => onChange([...rows, emptyRow()])}
+          onClick={() => {
+            const withoutBalance = rows.filter((r) => !isBalanceRow(r));
+            onChange(ensureSpecialAllowance([...withoutBalance, emptyRow()]));
+          }}
         >
           <Plus size={14} /> Add field
         </button>
@@ -175,11 +255,17 @@ function RowEditor({
           </p>
         )}
         {rows.map((r, i) => {
-          const locked = r.calculationType === 'balance_of_ctc';
+          const locked = isBalanceRow(r);
           const isFixed = r.calculationType === 'fixed';
           const inputsDisabled = locked || monthlyCtc <= 0;
+          const displayAmount = locked && showBalanceAmount
+            ? (monthlyCtc > 0 ? String(round2(balanceAmount)) : '')
+            : r.amount;
           return (
-            <div key={i} className="grid grid-cols-12 items-start gap-2">
+            <div
+              key={i}
+              className={`grid grid-cols-12 items-start gap-2 ${locked ? 'rounded-md bg-emerald-50/80 p-2 ring-1 ring-emerald-200' : ''}`}
+            >
               <TextField
                 className="col-span-3"
                 size="small"
@@ -187,6 +273,7 @@ function RowEditor({
                 value={r.label}
                 onChange={(e) => updateAt(i, { label: e.target.value })}
                 required
+                disabled={r.lockedBalance}
               />
               <TextField
                 className="col-span-3"
@@ -195,8 +282,12 @@ function RowEditor({
                 label="Type"
                 value={r.calculationType}
                 onChange={(e) => onType(i, e.target.value)}
+                disabled={r.lockedBalance}
               >
-                {CALC_TYPES.map((c) => (
+                {(r.lockedBalance
+                  ? CALC_TYPES.filter((c) => c.value === 'balance_of_ctc')
+                  : typeOptions
+                ).map((c) => (
                   <MenuItem key={c.value} value={c.value}>{c.label}</MenuItem>
                 ))}
               </TextField>
@@ -205,27 +296,34 @@ function RowEditor({
                 size="small"
                 type="number"
                 label="%"
-                value={r.percent}
+                value={locked ? '' : r.percent}
                 onChange={(e) => onPercent(i, e.target.value)}
                 disabled={inputsDisabled || isFixed}
                 inputProps={{ min: 0, step: '0.01' }}
+                helperText={locked ? 'Auto' : undefined}
               />
               <TextField
                 className="col-span-3"
                 size="small"
                 type="number"
                 label="Amount (₹ / month)"
-                value={r.amount}
+                value={displayAmount}
                 onChange={(e) => onAmount(i, e.target.value)}
                 disabled={inputsDisabled}
                 inputProps={{ min: 0, step: '0.01' }}
+                helperText={locked ? 'Fills remaining CTC' : undefined}
               />
               <IconButton
                 className="col-span-1 mt-1"
                 size="small"
                 color="error"
-                onClick={() => onChange(rows.filter((_, idx) => idx !== i))}
+                disabled={r.lockedBalance && !allowRemoveBalance}
+                onClick={() => {
+                  if (r.lockedBalance) return;
+                  onChange(ensureSpecialAllowance(rows.filter((_, idx) => idx !== i)));
+                }}
                 aria-label="Remove field"
+                title={r.lockedBalance ? 'Special Allowance is required' : 'Remove field'}
               >
                 <Trash2 size={16} />
               </IconButton>
@@ -233,6 +331,76 @@ function RowEditor({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function CtcAllocationMeter({ summary }) {
+  if (summary.monthly <= 0) return null;
+  const pctUsed = Math.min(100, (summary.allocated / summary.monthly) * 100);
+  const pctOver = summary.status === 'over'
+    ? Math.min(40, (summary.overBy / summary.monthly) * 100)
+    : 0;
+  const barColor = summary.status === 'over'
+    ? 'bg-red-500'
+    : summary.status === 'exact'
+      ? 'bg-emerald-500'
+      : 'bg-amber-500';
+  const box = summary.status === 'over'
+    ? 'border-red-300 bg-red-50 text-red-900'
+    : summary.status === 'exact'
+      ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+      : 'border-amber-300 bg-amber-50 text-amber-950';
+
+  return (
+    <div className={`rounded-lg border p-3 text-sm ${box}`}>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-semibold">
+          {summary.status === 'over' && 'Earnings exceed monthly CTC'}
+          {summary.status === 'exact' && 'Earnings match monthly CTC'}
+          {summary.status === 'under' && 'Special Allowance will take the remainder'}
+        </p>
+        <p className="text-xs font-medium tabular-nums">
+          % of CTC fields: {summary.ctcPercentSum}%
+          {summary.ctcPercentSum > 100 ? ' (over 100%)' : ''}
+        </p>
+      </div>
+      <div className="mb-2 h-2.5 overflow-hidden rounded-full bg-white/70 ring-1 ring-black/5">
+        <div className="flex h-full w-full">
+          <div className={`h-full ${barColor}`} style={{ width: `${pctUsed}%` }} />
+          {pctOver > 0 && (
+            <div className="h-full bg-red-700/80" style={{ width: `${pctOver}%` }} />
+          )}
+        </div>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+        <div>
+          <dt className="text-muted">Monthly CTC</dt>
+          <dd className="font-semibold tabular-nums">₹ {fmtInr(summary.monthly)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Allocated (excl. Special)</dt>
+          <dd className="font-semibold tabular-nums">₹ {fmtInr(summary.allocated)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Special Allowance</dt>
+          <dd className="font-semibold tabular-nums">
+            {summary.status === 'over' ? '—' : `₹ ${fmtInr(summary.specialAmount)}`}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted">{summary.status === 'over' ? 'Over by' : 'Remaining'}</dt>
+          <dd className="font-semibold tabular-nums">
+            ₹ {fmtInr(summary.status === 'over' ? summary.overBy : summary.remaining)}
+          </dd>
+        </div>
+      </dl>
+      {summary.status === 'over' && (
+        <p className="mt-2 text-xs">
+          Reduce % of CTC / fixed amounts so the total is at most monthly CTC.
+          Example: 50% + 50% + 25% of CTC = 125% — that is not allowed.
+        </p>
+      )}
     </div>
   );
 }
@@ -253,6 +421,10 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
 
   const basicAmt = useMemo(() => basicAmountOf(earnings), [earnings]);
   const canAddFields = monthlyCtc > 0;
+  const ctcSummary = useMemo(
+    () => summarizeEarningsVsCtc(earnings, monthlyCtc),
+    [earnings, monthlyCtc]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -260,49 +432,49 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
       setName(template.name || '');
       setDescription(template.description || '');
       setAnnualCtc('');
-      setEarnings(rowsFromStructure(template.earningsStructure));
-      setDeductions(rowsFromStructure(template.deductionsStructure));
+      setEarnings(mapStructureRows(template.earningsStructure, { asEarnings: true }));
+      setDeductions(mapStructureRows(template.deductionsStructure, { asEarnings: false }));
     } else {
       setName('');
       setDescription('');
       setAnnualCtc('');
-      setEarnings([]);
+      setEarnings(ensureSpecialAllowance([]));
       setDeductions([]);
     }
   }, [open, template]);
 
-  /** CTC entered → fill amounts from stored/entered percentages. */
+  /** Keep balance amounts in sync after CTC / earnings edits. */
+  const refreshEarnings = (rows, monthly = monthlyCtc) => {
+    const pass1 = syncAmounts(ensureSpecialAllowance(rows), monthly, 0).map((r) => {
+      if (r.calculationType === 'percentage_of_basic' || r.calculationType === 'fixed' || isBalanceRow(r)) {
+        return r;
+      }
+      if (r.percent === '' || r.percent == null) return r;
+      return {
+        ...r,
+        amount: amountFromPercent(r.calculationType, r.percent, monthly, 0)
+      };
+    });
+    const basic = basicAmountOf(pass1);
+    return pass1.map((r) => {
+      if (r.calculationType !== 'percentage_of_basic') return r;
+      if (r.percent === '' || r.percent == null) return r;
+      return {
+        ...r,
+        amount: amountFromPercent('percentage_of_basic', r.percent, monthly, basic)
+      };
+    });
+  };
+
   const applyCtc = (raw) => {
     setAnnualCtc(raw);
     const monthly = num(raw) > 0 ? num(raw) / 12 : 0;
     if (monthly <= 0) return;
-
-    setEarnings((prev) => {
-      // First pass: % of CTC (fixed amounts stay absolute), then % of Basic.
-      const pass1 = syncAmounts(prev, monthly, 0).map((r) => {
-        if (r.calculationType === 'percentage_of_basic' || r.calculationType === 'fixed') return r;
-        if (r.calculationType === 'balance_of_ctc') return r;
-        if (r.percent === '' || r.percent == null) return r;
-        return {
-          ...r,
-          amount: amountFromPercent(r.calculationType, r.percent, monthly, 0)
-        };
-      });
-      const basic = basicAmountOf(pass1);
-      return pass1.map((r) => {
-        if (r.calculationType !== 'percentage_of_basic') return r;
-        if (r.percent === '' || r.percent == null) return r;
-        return {
-          ...r,
-          amount: amountFromPercent('percentage_of_basic', r.percent, monthly, basic)
-        };
-      });
-    });
-
+    setEarnings((prev) => refreshEarnings(prev, monthly));
     setDeductions((prev) => {
       const basic = basicAmountOf(earnings);
       return prev.map((r) => {
-        if (r.calculationType === 'balance_of_ctc' || r.calculationType === 'fixed') return r;
+        if (r.calculationType === 'fixed' || isBalanceRow(r)) return r;
         if (r.percent === '' || r.percent == null) return r;
         return {
           ...r,
@@ -313,16 +485,9 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
   };
 
   const setEarningsAndCascade = (next) => {
-    const basic = basicAmountOf(next);
-    const synced = next.map((r) => {
-      if (r.calculationType !== 'percentage_of_basic') return r;
-      if (r.percent === '' || r.percent == null) return r;
-      return {
-        ...r,
-        amount: amountFromPercent('percentage_of_basic', r.percent, monthlyCtc, basic)
-      };
-    });
+    const synced = refreshEarnings(next, monthlyCtc);
     setEarnings(synced);
+    const basic = basicAmountOf(synced);
     setDeductions((prev) => prev.map((r) => {
       if (r.calculationType !== 'percentage_of_basic') return r;
       if (r.percent === '' || r.percent == null) return r;
@@ -334,7 +499,7 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
   };
 
   const toStoredRow = (row) => {
-    const type = row.calculationType;
+    const type = isBalanceRow(row) ? 'balance_of_ctc' : row.calculationType;
     const label = String(row.label || '').trim();
     if (type === 'fixed') {
       return {
@@ -345,7 +510,7 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
       };
     }
     if (type === 'balance_of_ctc') {
-      return { key: keyFromLabel(label), label, calculationType: type, valueFactor: 0 };
+      return { key: keyFromLabel(label) || 'special_allowance', label, calculationType: type, valueFactor: 0 };
     }
     return {
       key: keyFromLabel(label),
@@ -360,14 +525,26 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
     if (!canAddFields) {
       return dispatch(notifyError('Enter Annual CTC first, then add salary fields.'));
     }
-    if (!earnings.length) {
-      return dispatch(notifyError('Add at least one earning field.'));
+    const withSpecial = ensureSpecialAllowance(earnings);
+    if (!withSpecial.some((r) => !isBalanceRow(r))) {
+      return dispatch(notifyError('Add at least one earning field besides Special Allowance.'));
     }
     if (
-      earnings.some((r) => !String(r.label || '').trim())
+      withSpecial.some((r) => !String(r.label || '').trim())
       || deductions.some((r) => !String(r.label || '').trim())
     ) {
       return dispatch(notifyError('Every field needs a label.'));
+    }
+    const summary = summarizeEarningsVsCtc(withSpecial, monthlyCtc);
+    if (summary.ctcPercentSum > 100) {
+      return dispatch(notifyError(
+        `% of CTC fields add up to ${summary.ctcPercentSum}% (max 100%). Reduce percentages or use Special Allowance for the rest.`
+      ));
+    }
+    if (summary.status === 'over') {
+      return dispatch(notifyError(
+        `Earnings exceed monthly CTC by ₹ ${fmtInr(summary.overBy)}. Reduce amounts before saving.`
+      ));
     }
 
     setSaving(true);
@@ -375,7 +552,7 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
       const body = {
         name,
         description,
-        earningsStructure: ensureUniqueKeys(earnings.map(toStoredRow)),
+        earningsStructure: ensureUniqueKeys(withSpecial.map(toStoredRow)),
         deductionsStructure: ensureUniqueKeys(deductions.map(toStoredRow))
       };
       if (template) await updateTemplate(template._id, body);
@@ -437,28 +614,31 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
             <TextField
               label="Monthly CTC (₹)"
               size="small"
-              value={monthlyCtc > 0 ? round2(monthlyCtc).toLocaleString('en-IN') : '—'}
+              value={monthlyCtc > 0 ? fmtInr(monthlyCtc) : '—'}
               InputProps={{ readOnly: true }}
               fullWidth
             />
           </div>
         </div>
 
-        <div>
-          <p className="mb-2 text-sm font-semibold text-ink">2. Structure fields</p>
+        <div className="space-y-3">
+          <p className="text-sm font-semibold text-ink">2. Earnings</p>
           <RowEditor
-            title="Earnings"
+            title="Earnings components"
             rows={earnings}
             onChange={setEarningsAndCascade}
             monthlyCtc={monthlyCtc}
             basicAmt={basicAmt}
             canAdd={canAddFields}
             addHint="Enter Annual CTC above before adding fields."
+            showBalanceAmount
+            balanceAmount={ctcSummary.specialAmount}
           />
+          <CtcAllocationMeter summary={ctcSummary} />
         </div>
 
         <RowEditor
-          title="Deductions"
+          title="3. Deductions"
           rows={deductions}
           onChange={setDeductions}
           monthlyCtc={monthlyCtc}
@@ -468,8 +648,8 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
         />
 
         <p className="text-xs text-muted">
-          Tip: use one <strong>Balance of CTC</strong> earning (e.g. Special Allowance) so earnings
-          always reconcile to monthly CTC. Field keys are generated from labels automatically.
+          <strong>Special Allowance</strong> is always Balance of CTC — it automatically receives
+          whatever is left of monthly CTC after your other earnings. % of CTC fields cannot exceed 100%.
         </p>
       </div>
     </FormDialog>

@@ -6,7 +6,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { formatINR } from '../utils/money.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import ApiError from '../utils/ApiError.js';
-import { reconcileEarningsToCtc } from '../utils/salaryEngine.js';
+import { monthlyCtcFromAnnual } from '../utils/salaryEngine.js';
 import { downscaleForPdfEmbed } from './brandingOptimize.js';
 
 const ROOT = process.cwd();
@@ -349,7 +349,8 @@ const firstNameOf = (fullName) => {
   return cleaned[0] || fullName || 'Candidate';
 };
 
-const amountCell = (paisa) => formatINR(paisa, { symbol: '', decimals: false }).trim();
+/** Offer/appointment salary cells — always show paise so ₹2,000.84 is not shown as 2,000. */
+const amountCell = (paisa) => formatINR(paisa, { symbol: '', decimals: true }).trim();
 
 /**
  * Render a SalarySlip document to a print-ready A4 PDF on the company page template.
@@ -825,14 +826,12 @@ export const generateOfferLetterPdf = async ({
   y -= 8;
 
   // Bordered salary breakdown table.
-  // Gross must equal monthly CTC (reconcile shortfalls left by fixed/% earnings).
-  // Net = Gross − Σ deduction lines (once). No separate "Total Deductions" row —
-  // that duplicated PF and looked like Gross − PF − Total Deduction.
-  const monthlyCtc = Math.round(Number(annualCTC || 0) / 12);
-  const reconciled = reconcileEarningsToCtc(breakdown?.earnings || [], monthlyCtc);
-  const earnLines = reconciled.earnings;
+  // Gross comes from the frozen breakdown (Special Allowance = Balance of CTC).
+  // Net = Gross − Σ deduction lines (once).
+  const monthlyCtc = monthlyCtcFromAnnual(annualCTC || 0);
+  const earnLines = breakdown?.earnings || [];
   const dedLines = breakdown?.deductions || [];
-  const grossPaisa = reconciled.grossEarnings
+  const grossPaisa = earnLines.reduce((s, e) => s + (Number(e.monthlyAmount) || 0), 0)
     || Number(breakdown?.grossEarnings)
     || 0;
   const totalDedPaisa = dedLines.reduce((s, d) => s + (Number(d.monthlyAmount) || 0), 0);

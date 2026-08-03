@@ -2,8 +2,21 @@ import { percentOfPaisa } from './money.js';
 import ApiError from './ApiError.js';
 
 /**
+ * Split annual CTC (paisa) into a monthly pool (paisa).
+ * Integer paisa only — no floating rupees in the engine.
+ * Uses nearest-paisa monthly amount (same as Math.round(annual/12)).
+ * Special Allowance then makes Σ monthly earnings === this pool exactly.
+ * Note: |12 × monthly − annual| is at most a few paisa when annual is not
+ * divisible by 12; the letter's Annual CTC remains the contractual total.
+ */
+export const monthlyCtcFromAnnual = (annualCTCPaisa) => {
+  const annual = Math.round(Number(annualCTCPaisa));
+  return Math.round(annual / 12);
+};
+
+/**
  * Compute one structure block (earnings OR deductions) into resolved line
- * items. All amounts are in paisa.
+ * items. All amounts are in integer paisa (nearest paisa via percentOfPaisa).
  *
  * Resolution order (within a block):
  *   1. fixed / percentage_of_ctc           — independent
@@ -37,6 +50,7 @@ const computeBlock = (fields = [], monthlyCTC, basicAmount) => {
   }
 
   // Pass 3 — balance_of_ctc (only meaningful for earnings).
+  // Absorbs every leftover paisa so Σ earnings === monthlyCTC exactly.
   for (const f of fields) {
     if (f.calculationType === 'balance_of_ctc') {
       const allocated = [...amounts.values()].reduce((s, v) => s + v, 0);
@@ -55,40 +69,11 @@ const computeBlock = (fields = [], monthlyCTC, basicAmount) => {
 const sum = (items) => items.reduce((s, i) => s + i.monthlyAmount, 0);
 
 /**
- * When fixed/% earnings leave a gap vs monthly CTC (and the template has no
- * balance_of_ctc field), append a separate balancing line so Gross === monthly CTC.
- *
- * Never mutate existing lines — fixed amounts (e.g. Phone Allowance ₹500) must
- * stay exactly as configured in the salary template.
- */
-export const reconcileEarningsToCtc = (earnings, monthlyCTC) => {
-  const lines = (earnings || []).map((e) => ({ ...e, monthlyAmount: Number(e.monthlyAmount) || 0 }));
-  const gross = sum(lines);
-  const gap = Math.round(Number(monthlyCTC) || 0) - gross;
-  if (gap <= 0) return { earnings: lines, grossEarnings: gross };
-
-  const already = lines.findIndex((e) => e.key === 'balancing_allowance');
-  if (already >= 0) {
-    lines[already] = {
-      ...lines[already],
-      monthlyAmount: lines[already].monthlyAmount + gap
-    };
-  } else {
-    lines.push({
-      key: 'balancing_allowance',
-      label: 'Balancing Allowance',
-      monthlyAmount: gap
-    });
-  }
-  return { earnings: lines, grossEarnings: Math.round(Number(monthlyCTC) || 0) };
-};
-
-/**
  * Compute a frozen monthly salary breakdown for an employee from a template
  * and an annual CTC (both monetary inputs in paisa).
  *
- * Invariant: grossEarnings === monthly CTC (when CTC ≥ allocated earnings).
- * Net take-home = grossEarnings − Σ deductions (once).
+ * Special Allowance (balance_of_ctc) absorbs monthly CTC − other earnings so
+ * Gross === monthly CTC exactly (integer paisa, including values like ₹2,000.84).
  *
  * @returns {{earnings, deductions, grossEarnings, totalDeductions, netTakeHome}}
  */
@@ -98,14 +83,42 @@ export const computeBreakdown = (template, annualCTCPaisa) => {
     throw new ApiError(400, 'annualCTC must be a positive amount');
   }
 
-  const monthlyCTC = Math.round(annualCTCPaisa / 12);
+  const annual = Math.round(Number(annualCTCPaisa));
+  const monthlyCTC = monthlyCtcFromAnnual(annual);
+  const earningsStructure = [...(template.earningsStructure || [])];
+  const hasBalance = earningsStructure.some((f) => f.calculationType === 'balance_of_ctc');
 
-  let earnings = computeBlock(template.earningsStructure, monthlyCTC, 0);
-  const hasBalance = (template.earningsStructure || []).some(
-    (f) => f.calculationType === 'balance_of_ctc'
-  );
+  // Templates created before Special Allowance was required: append it so Gross
+  // still reconciles. New templates always include it from the setup UI.
   if (!hasBalance) {
-    ({ earnings } = reconcileEarningsToCtc(earnings, monthlyCTC));
+    earningsStructure.push({
+      key: 'special_allowance',
+      label: 'Special Allowance',
+      calculationType: 'balance_of_ctc',
+      valueFactor: 0
+    });
+  }
+
+  // Reject % of CTC totals over 100% (same rule as template UI).
+  const ctcPercentSum = earningsStructure
+    .filter((f) => f.calculationType === 'percentage_of_ctc')
+    .reduce((s, f) => s + Number(f.valueFactor || 0), 0);
+  if (ctcPercentSum > 100 + 1e-6) {
+    throw new ApiError(
+      400,
+      `% of CTC earnings add up to ${ctcPercentSum}% (maximum 100%). Adjust the salary template.`
+    );
+  }
+
+  const earnings = computeBlock(earningsStructure, monthlyCTC, 0);
+  const allocatedWithoutBalance = earnings
+    .filter((_, i) => earningsStructure[i]?.calculationType !== 'balance_of_ctc')
+    .reduce((s, e) => s + e.monthlyAmount, 0);
+  if (allocatedWithoutBalance > monthlyCTC + 1) {
+    throw new ApiError(
+      400,
+      'Earnings exceed monthly CTC. Reduce fixed/% amounts or fix the salary template.'
+    );
   }
 
   const basic = earnings.find((e) => e.key === 'basic' || /^basic/i.test(e.key || e.label || ''))

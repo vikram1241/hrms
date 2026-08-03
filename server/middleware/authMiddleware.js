@@ -37,6 +37,9 @@ export const verifyToken = asyncHandler(async (req, res, next) => {
   if (!user) {
     throw new ApiError(401, 'Account no longer exists');
   }
+  if (user.deletedAt) {
+    throw new ApiError(403, 'This account has been deleted');
+  }
   if (!user.isActive) {
     throw new ApiError(403, 'Account is deactivated');
   }

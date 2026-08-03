@@ -50,6 +50,16 @@ test('deactivated account is rejected with 403', async () => {
   assert.equal(res.status, 403);
 });
 
+test('soft-deleted account cannot log in even with valid password', async () => {
+  const user = await createUser({ email: 'gone@xyz.com', password: 'Password1', isActive: true });
+  user.deletedAt = new Date();
+  user.isActive = false;
+  await user.save();
+  const res = await request(app).post('/api/auth/login').send({ companySlug: SLUG, email: 'gone@xyz.com', password: 'Password1' });
+  assert.equal(res.status, 403);
+  assert.match(res.body.message, /deleted/i);
+});
+
 test('missing email/Employee ID fails validation with 400', async () => {
   const res = await request(app).post('/api/auth/login').send({ companySlug: SLUG, password: 'Password1' });
   assert.equal(res.status, 400);

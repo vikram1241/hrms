@@ -100,8 +100,16 @@ export default function PayslipsPage() {
           <TextField select size="small" label="Year" value={period.year} onChange={(e) => setPeriod({ ...period, year: Number(e.target.value) })} sx={{ minWidth: 120 }}>
             {YEARS.map((y) => <MenuItem key={y} value={y}>{y}</MenuItem>)}
           </TextField>
-          <FormControlLabel control={<Checkbox size="small" checked={notify} onChange={(e) => setNotify(e.target.checked)} />} label={<span className="text-sm text-muted">Email payslips to employees</span>} />
+          <FormControlLabel
+            control={<Checkbox size="small" checked={notify} onChange={(e) => setNotify(e.target.checked)} />}
+            label={<span className="text-sm text-muted">Email salary slip PDF to employees</span>}
+          />
         </div>
+        {notify && (
+          <p className="mt-2 text-xs text-muted">
+            Each generated slip is emailed to the employee with the PDF attached. They can also open it under Salary Slips after login.
+          </p>
+        )}
       </Card>
 
       <DataGrid

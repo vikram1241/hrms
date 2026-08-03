@@ -308,6 +308,34 @@ test('Bulk attendance — import from an .xlsx roster (by employeeId/email)', as
   assert.equal((await admin.get('/api/attendance').query({ userId: String(user._id) })).body.data.length, 2);
 });
 
+test('Bulk attendance — Mirus matrix import (P/A/L, empty skipped)', async () => {
+  const { admin } = await setup();
+  await authAgent(app, {
+    email: 'mirus1@xyz.com',
+    role: 'employee',
+    employeeDetails: { employeeId: 'MMS0011' },
+    personalDetails: { firstName: 'Ravinder', lastName: 'T' }
+  });
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('JULY');
+  ws.addRow(['COMPANY - STAFF ATTENDANCE FOR THE MONTH OF JULY 2026']);
+  ws.addRow(['S.No.', 'Emp.Id', 'Name of The Employee', 'Contact No.', 'WED', 'THUR', 'FRI', 'SAT', 'PD', 'AD', 'TD']);
+  ws.addRow(['', '', '', '', 1, 2, 3, 4, '', '', '']);
+  // P, A, empty (skip), L
+  ws.addRow([1, 'MMS0011', 'Ravinder T', '93978 17795', 'P', 'A', '', 'L', 2, 1, 3]);
+  const buffer = await wb.xlsx.writeBuffer();
+
+  const res = await admin.post('/api/attendance/bulk-upload')
+    .attach('roster', Buffer.from(buffer), { filename: 'mirus.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.format, 'mirus');
+  assert.equal(res.body.imported.length, 3);
+  assert.ok(res.body.skippedEmpty >= 1);
+  const statuses = res.body.imported.map((i) => i.status).sort();
+  assert.deepEqual(statuses, ['Absent', 'Leave', 'Present']);
+});
+
 test('Epic 16 — statutory engine computes PF/ESI/PT/TDS', () => {
   // Basic ₹45,000 => PF = 12% of min(45000,15000) = ₹1,800 = 180000 paisa.
   assert.equal(computePF(4_500_000), 180_000);

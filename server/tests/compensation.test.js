@@ -64,6 +64,24 @@ test('assign salary freezes a computed breakdown in paisa', async () => {
   assert.equal(res.body.assignment.frozenMonthlyBreakdown.netTakeHome, 9440000);
 });
 
+test('cannot deactivate a template assigned to an employee', async () => {
+  const { agent } = await adminAgent();
+  const tpl = await seedTemplate(agent);
+  const emp = await createUser({ email: 'on-tpl@xyz.com', role: 'employee', isActive: true });
+  await agent.post('/api/salary-assignments')
+    .send({ userId: emp._id, templateId: tpl._id, annualCTC: 1200000 });
+
+  const del = await agent.delete(`/api/salary-templates/${tpl._id}`);
+  assert.equal(del.status, 409);
+  assert.match(del.body.message, /assigned/i);
+
+  const viaPut = await agent.put(`/api/salary-templates/${tpl._id}`).send({ isActive: false });
+  assert.equal(viaPut.status, 409);
+
+  const still = await agent.get(`/api/salary-templates/${tpl._id}`);
+  assert.equal(still.body.template.isActive, true);
+});
+
 test('payslip generation creates idempotent slips and employees can list/download their own', async () => {
   const { agent } = await adminAgent();
   const tpl = await seedTemplate(agent);

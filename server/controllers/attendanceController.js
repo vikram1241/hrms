@@ -6,6 +6,10 @@ import Holiday from '../models/Holiday.js';
 import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import {
+  parseMirusAttendanceWorkbook,
+  normalizePhoneDigits
+} from '../services/mirusAttendanceImport.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10); // 'YYYY-MM-DD'
 
@@ -100,30 +104,121 @@ const cellVal = (row, idx) => {
   return v;
 };
 
+/** Resolve employee by Emp.Id, then phone digits, then exact full name. */
+const resolveAttendanceUser = async ({ empId, phoneDigits, name }) => {
+  if (empId) {
+    const byId = await User.findOne({
+      'employeeDetails.employeeId': String(empId).trim().toUpperCase()
+    }).select('_id employeeDetails.employeeId');
+    if (byId) return byId;
+  }
+  if (phoneDigits && phoneDigits.length >= 10) {
+    const users = await User.find({
+      $or: [
+        { 'contactInfo.personalMobile': { $regex: `${phoneDigits.slice(-10)}$` } },
+        { 'contactInfo.workMobile': { $regex: `${phoneDigits.slice(-10)}$` } }
+      ]
+    }).select('_id contactInfo.personalMobile contactInfo.workMobile').limit(5);
+    const match = users.find((u) => {
+      const a = normalizePhoneDigits(u.contactInfo?.personalMobile);
+      const b = normalizePhoneDigits(u.contactInfo?.workMobile);
+      return a.endsWith(phoneDigits.slice(-10)) || b.endsWith(phoneDigits.slice(-10));
+    });
+    if (match) return match;
+  }
+  if (name) {
+    const parts = String(name).trim().split(/\s+/).filter(Boolean);
+    if (parts.length) {
+      const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const first = parts[0];
+      const last = parts.slice(1).join(' ') || '-';
+      const byName = await User.findOne({
+        'personalDetails.firstName': new RegExp(`^${esc(first)}$`, 'i'),
+        'personalDetails.lastName': new RegExp(`^${esc(last)}$`, 'i')
+      }).select('_id');
+      if (byName) return byName;
+    }
+  }
+  return null;
+};
+
 /**
- * POST /api/attendance/bulk-upload — import attendance from an .xlsx roster.
- * Header row (case-insensitive), one of employeeId/email required to identify:
- *   employeeId | email | date | status | checkIn | checkOut
- * Malformed rows are reported by index without aborting the batch.
+ * Import Mirus monthly matrix (Emp.Id × days with P/A/L).
+ * @param {ReturnType<typeof parseMirusAttendanceWorkbook>} parsed
  */
-export const bulkUploadAttendance = asyncHandler(async (req, res) => {
-  if (!req.file) throw new ApiError(400, 'No file uploaded (field "roster")');
+const importMirusAttendance = async (parsed, markedBy) => {
+  const results = {
+    format: 'mirus',
+    imported: [],
+    failed: [...parsed.errors],
+    skippedEmpty: parsed.skippedEmpty,
+    sheets: parsed.sheets
+  };
+
+  // Cache Emp.Id → user for the file
+  const userCache = new Map();
+
+  for (const mark of parsed.marks) {
+    try {
+      let user = userCache.get(mark.empId);
+      if (user === undefined) {
+        user = await resolveAttendanceUser({
+          empId: mark.empId,
+          phoneDigits: mark.phoneDigits,
+          name: mark.name
+        });
+        userCache.set(mark.empId, user || null);
+      }
+      if (!user) throw new Error(`Employee not found (${mark.empId})`);
+
+      await upsertAttendance({
+        userId: user._id,
+        body: { date: mark.date, status: mark.status },
+        markedBy
+      });
+      results.imported.push({
+        sheet: mark.sheet,
+        row: mark.row,
+        employee: mark.empId,
+        date: mark.dateKey,
+        status: mark.status
+      });
+    } catch (err) {
+      results.failed.push({
+        sheet: mark.sheet,
+        row: mark.row,
+        employee: mark.empId,
+        date: mark.dateKey,
+        error: err.message
+      });
+    }
+  }
+
+  return results;
+};
+
+/**
+ * Legacy flat roster: employeeId | email | date | status | checkIn | checkOut
+ */
+const importLegacyFlatAttendance = async (buffer, markedBy) => {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(req.file.buffer);
+  await wb.xlsx.load(buffer);
   const sheet = wb.worksheets[0];
   if (!sheet) throw new ApiError(400, 'The spreadsheet has no worksheets');
 
   const col = {};
   sheet.getRow(1).eachCell((c, idx) => { col[String(c.value).trim().toLowerCase()] = idx; });
-  if (!col.employeeid && !col.email) throw new ApiError(400, 'Sheet must have an "employeeId" or "email" column');
+  if (!col.employeeid && !col.email) {
+    throw new ApiError(400, 'Sheet must have an "employeeId" or "email" column (or use Mirus Staff Attendance format)');
+  }
   if (!col.date) throw new ApiError(400, 'Sheet must have a "date" column');
 
-  const results = { imported: [], failed: [] };
+  const results = { format: 'flat', imported: [], failed: [], skippedEmpty: 0 };
   for (let r = 2; r <= sheet.rowCount; r++) {
     const row = sheet.getRow(r);
     const empId = col.employeeid ? cellVal(row, col.employeeid) : null;
     const email = col.email ? cellVal(row, col.email) : null;
-    if (!empId && !email) continue; // blank row
+    if (!empId && !email) continue;
 
     try {
       const query = empId
@@ -133,23 +228,63 @@ export const bulkUploadAttendance = asyncHandler(async (req, res) => {
       if (!user) throw new Error('Employee not found');
 
       const date = cellVal(row, col.date);
+      const statusRaw = (col.status && cellVal(row, col.status)) || 'Present';
+      const statusMap = { P: 'Present', A: 'Absent', L: 'Leave' };
+      const status = statusMap[String(statusRaw).trim().toUpperCase()] || statusRaw;
+
       await upsertAttendance({
         userId: user._id,
         body: {
           date: date ? new Date(date) : new Date(),
-          status: (col.status && cellVal(row, col.status)) || 'Present',
+          status,
           checkIn: col.checkin ? cellVal(row, col.checkin) : undefined,
           checkOut: col.checkout ? cellVal(row, col.checkout) : undefined
         },
-        markedBy: req.user._id
+        markedBy
       });
       results.imported.push({ row: r, employee: empId || email });
     } catch (err) {
       results.failed.push({ row: r, employee: empId || email, error: err.message });
     }
   }
+  return results;
+};
 
-  res.status(201).json({ success: true, message: `Imported ${results.imported.length}, failed ${results.failed.length}`, ...results });
+/**
+ * POST /api/attendance/bulk-upload — import attendance from .xls / .xlsx.
+ * Supports:
+ *   1) Mirus Staff Attendance matrix (Emp.Id × days, marks P/A/L; empty = skip)
+ *   2) Legacy flat rows: employeeId | email | date | status | checkIn | checkOut
+ */
+export const bulkUploadAttendance = asyncHandler(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'No file uploaded (field "roster")');
+  const buffer = req.file.buffer;
+
+  // Prefer Mirus matrix when detectable; otherwise fall back to flat roster.
+  let results;
+  const mirusProbe = parseMirusAttendanceWorkbook(buffer);
+  if (mirusProbe.format === 'mirus') {
+    results = await importMirusAttendance(mirusProbe, req.user._id);
+  } else {
+    try {
+      results = await importLegacyFlatAttendance(buffer, req.user._id);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(
+        400,
+        'Unrecognized attendance spreadsheet. Upload the Mirus Staff Attendance file (Emp.Id, daily P/A/L) or the flat employeeId/date/status sample.'
+      );
+    }
+  }
+
+  const skipNote = results.skippedEmpty
+    ? `, skipped ${results.skippedEmpty} empty day cell(s)`
+    : '';
+  res.status(201).json({
+    success: true,
+    message: `Imported ${results.imported.length}, failed ${results.failed.length}${skipNote}`,
+    ...results
+  });
 });
 
 /** GET /api/attendance?userId&month&year&from&to&status — HR attendance register. */

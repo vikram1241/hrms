@@ -235,13 +235,46 @@ export const sendCredentials = async ({ to, fullName, employeeId, email, tempPas
   });
 };
 
-export const sendPayslipNotice = ({ to, fullName, period }) =>
-  sendEmail({
+/**
+ * Email a generated salary slip to the employee, with PDF attached when available.
+ */
+export const sendPayslipNotice = async ({
+  to, fullName, period, pdfPath, fileName
+} = {}) => {
+  const cfg = await loadCompanyMail();
+  const brand = cfg.brandName;
+  const subj = `Your salary slip for ${period}`;
+  const body = [
+    `Hi ${fullName},`,
+    '',
+    `Please find attached your salary slip for ${period}.`,
+    '',
+    'You can also view and download it anytime from Salary Slips after signing in to the employee portal.',
+    '',
+    `— ${brand}`
+  ].join('\n');
+  const html = wrapHtml(
+    `<p>Hi <strong>${fullName}</strong>,</p>
+     <p>Please find attached your salary slip for <strong>${period}</strong>.</p>
+     <p>You can also view and download it anytime from <strong>Salary Slips</strong> after signing in to the employee portal.</p>`,
+    brand
+  );
+  return deliver({
     to,
-    subject: `Your payslip for ${period}`,
-    body: `Hi ${fullName}, your payslip for ${period} is available in the portal.`,
-    meta: { type: 'payslip_notice', period }
+    subject: subj,
+    body,
+    html,
+    meta: { type: 'payslip_notice', period, hasPdf: Boolean(pdfPath) },
+    cfg,
+    attachments: pdfPath
+      ? [{
+        filename: fileName || `payslip-${period.replace(/\s+/g, '-')}.pdf`,
+        path: pdfPath,
+        contentType: 'application/pdf'
+      }]
+      : undefined
   });
+};
 
 /**
  * Email an appointment letter PDF using subject/body from Letter Template Setup

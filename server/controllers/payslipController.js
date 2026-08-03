@@ -10,6 +10,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import { generatePayslipPdf } from '../services/pdfService.js';
 import { sendPayslipNotice } from '../services/emailService.js';
+import { queueMailJob } from '../services/mailQueue.js';
 import { computeStatutoryDeductions } from '../utils/statutoryEngine.js';
 import { logActivity } from '../services/activityService.js';
 
@@ -126,6 +127,7 @@ const buildSlip = async (assignment, month, year, notify, { applyStatutory = fal
   };
 
   const company = await Company.findById(user.companyId);
+  if (user.companyId) slipData.companyId = user.companyId;
   const pdfUrl = await generatePayslipPdf(slipData, company);
   slipData.pdfUrl = pdfUrl;
 
@@ -135,18 +137,42 @@ const buildSlip = async (assignment, month, year, notify, { applyStatutory = fal
     { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true }
   );
 
+  let email = null;
   if (notify) {
-    await sendPayslipNotice({ to: user.email, fullName: slipData.metaSnapshot.fullName, period: `${MONTHS[month]} ${year}` });
-    slip.isEmailed = true;
-    await slip.save();
+    const period = `${MONTHS[month]} ${year}`;
+    const absPdf = path.resolve(process.cwd(), pdfUrl);
+    const safeName = String(slipData.metaSnapshot.fullName || 'employee').replace(/[^\w.-]+/g, '-');
+    email = await queueMailJob(() => sendPayslipNotice({
+      to: user.email,
+      fullName: slipData.metaSnapshot.fullName,
+      period,
+      pdfPath: fs.existsSync(absPdf) ? absPdf : undefined,
+      fileName: `Payslip-${safeName}-${MONTHS[month]}-${year}.pdf`
+    }));
+    // Mark emailed when queued (async) or delivered inline (tests / sync).
+    const delivered = Boolean(email?.result?.delivered || email?.queued);
+    if (delivered) {
+      slip.isEmailed = true;
+      await slip.save();
+    }
   }
-  return slip;
+  return { slip, email };
+};
+
+/** Eligible for payslip: active, not soft-deleted, has a non-empty employee code. */
+const isPayslipEligibleUser = (user) => {
+  if (!user) return false;
+  if (user.deletedAt) return false;
+  if (!user.isActive) return false;
+  const code = String(user.employeeDetails?.employeeId || '').trim();
+  return Boolean(code);
 };
 
 /**
  * POST /api/payslips/generate
  * US 4.2 — batch-process monthly payslips for selected employees (or all
  * employees that have a salary assignment).
+ * Only active employees with an employee code are included.
  * Body: { month, year, employeeIds?: string[], notify?: boolean }
  */
 export const generatePayslips = asyncHandler(async (req, res) => {
@@ -158,14 +184,25 @@ export const generatePayslips = asyncHandler(async (req, res) => {
   }
   const assignments = await EmployeeSalaryAssignment.find(filter).populate('userId');
 
-  const results = { generated: [], failed: [] };
+  const results = { generated: [], failed: [], skipped: [], emailed: 0 };
   for (const assignment of assignments) {
-    if (!assignment.userId) continue; // orphaned assignment
+    const user = assignment.userId;
+    if (!user) continue; // orphaned assignment
+    if (!isPayslipEligibleUser(user)) {
+      const reason = user.deletedAt
+        ? 'Employee is deleted'
+        : !user.isActive
+          ? 'Employee is inactive'
+          : 'Employee code is missing';
+      results.skipped.push({ employeeId: user._id, reason });
+      continue;
+    }
     try {
-      const slip = await buildSlip(assignment, month, year, notify, { applyStatutory, workingDays });
-      results.generated.push({ employeeId: assignment.userId._id, slipId: slip._id });
+      const { slip, email } = await buildSlip(assignment, month, year, notify, { applyStatutory, workingDays });
+      results.generated.push({ employeeId: user._id, slipId: slip._id, emailed: Boolean(slip.isEmailed) });
+      if (email?.queued || email?.result?.delivered) results.emailed += 1;
     } catch (err) {
-      results.failed.push({ employeeId: assignment.userId._id, error: err.message });
+      results.failed.push({ employeeId: user._id, error: err.message });
     }
   }
 
@@ -178,9 +215,15 @@ export const generatePayslips = asyncHandler(async (req, res) => {
     });
   }
 
+  const skipNote = results.skipped.length
+    ? ` (skipped ${results.skipped.length} inactive/missing employee code)`
+    : '';
+  const mailNote = notify
+    ? ` — ${results.emailed} email(s) queued with PDF attached`
+    : '';
   res.status(201).json({
     success: true,
-    message: `Generated ${results.generated.length} payslip(s) for ${MONTHS[month]} ${year}`,
+    message: `Generated ${results.generated.length} payslip(s) for ${MONTHS[month]} ${year}${skipNote}${mailNote}`,
     ...results
   });
 });

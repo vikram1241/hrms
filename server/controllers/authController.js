@@ -50,6 +50,10 @@ export const login = asyncHandler(async (req, res) => {
   const matches = await user.comparePassword(password);
   if (!matches) throw genericError;
 
+  // Soft-deleted accounts must never authenticate (even if isActive were stale).
+  if (user.deletedAt) {
+    throw new ApiError(403, 'This account has been deleted. Contact your administrator.');
+  }
   if (!user.isActive) {
     throw new ApiError(403, 'Account is deactivated. Contact your administrator.');
   }

@@ -195,6 +195,9 @@ export const softDeleteUser = asyncHandler(async (req, res) => {
 
   user.deletedAt = new Date();
   user.isActive = false;
+  // Invalidate any outstanding password-setup / reset links so the account
+  // cannot be reactivated via an old email token.
+  user.passwordSetup = { tokenHash: null, expiresAt: null };
   await user.save();
   await logActivity({
     actor: req.user,

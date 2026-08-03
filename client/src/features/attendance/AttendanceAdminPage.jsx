@@ -136,14 +136,21 @@ export default function AttendanceAdminPage() {
               <Button onClick={saveBulk} loading={bulkBusy}>Mark {bulk.userIds.length || ''} attendance</Button>
             </div>
 
-            <div className="flex items-center justify-between border-t border-line pt-3 text-xs">
-              <label className="inline-flex cursor-pointer items-center gap-1.5 font-medium text-primary-600 hover:underline">
-                <Upload size={13} /> Import from Excel
-                <input type="file" accept=".xlsx,.xls" hidden onChange={(e) => { importXlsx(e.target.files?.[0]); e.target.value = ''; }} />
-              </label>
-              <a className="inline-flex items-center gap-1.5 text-muted hover:text-primary-600" href="/samples/bulk-attendance-sample.xlsx" download>
-                <Download size={13} /> Sample .xlsx
-              </a>
+            <div className="space-y-1.5 border-t border-line pt-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 font-medium text-primary-600 hover:underline">
+                  <Upload size={13} /> Import from Excel
+                  <input type="file" accept=".xlsx,.xls" hidden onChange={(e) => { importXlsx(e.target.files?.[0]); e.target.value = ''; }} />
+                </label>
+                <a className="inline-flex items-center gap-1.5 text-muted hover:text-primary-600" href="/samples/bulk-attendance-sample.xlsx" download>
+                  <Download size={13} /> Sample .xlsx
+                </a>
+              </div>
+              <p className="text-muted">
+                Accepts <strong>Mirus Staff Attendance</strong> (.xls/.xlsx): Emp.Id, Name, Contact,
+                daily marks <strong>P</strong> present, <strong>A</strong> absent, <strong>L</strong> leave;
+                empty cells are skipped.
+              </p>
             </div>
           </div>
         </CardBody></Card>
