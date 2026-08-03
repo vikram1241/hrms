@@ -108,7 +108,7 @@ docker run -p 80:80 hrms-client
 - **Uploaded Files**: Mounted at `/app/uploads`
 
 ### Client
-- **Port**: 80
+- **Port**: 3001
 - **Base URL**: `http://localhost`
 - **Proxy**: Configured to forward `/api/*` requests to server
 

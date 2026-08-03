@@ -27,8 +27,8 @@ services:
       dockerfile: Dockerfile
     container_name: hrms-server
     # API is reached via nginx on :80 (/api). Keep 5000 published only for debugging.
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
       NODE_ENV: production
       PORT: 5000
@@ -66,8 +66,8 @@ services:
       context: ./client
       dockerfile: Dockerfile
     container_name: hrms-client
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     depends_on:
       - server
     networks:
