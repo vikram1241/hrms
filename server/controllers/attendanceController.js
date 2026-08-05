@@ -8,10 +8,23 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import {
   parseMirusAttendanceWorkbook,
+  parseSingleDayAttendanceWorkbook,
   normalizePhoneDigits
 } from '../services/mirusAttendanceImport.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10); // 'YYYY-MM-DD'
+
+/** Parse YYYY-MM-DD (or ISO) as UTC calendar-day start/end — avoids TZ drift. */
+const utcDayStart = (value) => {
+  const m = String(value || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return new Date(value);
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 0, 0, 0, 0));
+};
+const utcDayEnd = (value) => {
+  const m = String(value || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return new Date(value);
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 23, 59, 59, 999));
+};
 
 // Build an inclusive month range [start, nextMonthStart) for filtering.
 const monthRange = (month, year) => {
@@ -252,29 +265,76 @@ const importLegacyFlatAttendance = async (buffer, markedBy) => {
 
 /**
  * POST /api/attendance/bulk-upload — import attendance from .xls / .xlsx.
- * Supports:
- *   1) Mirus Staff Attendance matrix (Emp.Id × days, marks P/A/L; empty = skip)
- *   2) Legacy flat rows: employeeId | email | date | status | checkIn | checkOut
+ *
+ * Multipart fields:
+ *   roster (file) — required
+ *   mode = "month" | "day" — required
+ *   month, year — required when mode=month (UI is source of truth for period)
+ *   date (YYYY-MM-DD) — required when mode=day
+ *
+ * Month mode: Mirus matrix; day columns dated with UI month/year.
+ * Day mode: flat Emp.Id + Status for that date, or Mirus matrix filtered to that day.
  */
 export const bulkUploadAttendance = asyncHandler(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'No file uploaded (field "roster")');
   const buffer = req.file.buffer;
+  const mode = String(req.body.mode || '').trim().toLowerCase();
 
-  // Prefer Mirus matrix when detectable; otherwise fall back to flat roster.
+  if (!['month', 'day'].includes(mode)) {
+    throw new ApiError(400, 'mode is required: "month" (monthly sheet) or "day" (single date)');
+  }
+
   let results;
-  const mirusProbe = parseMirusAttendanceWorkbook(buffer);
-  if (mirusProbe.format === 'mirus') {
-    results = await importMirusAttendance(mirusProbe, req.user._id);
-  } else {
-    try {
-      results = await importLegacyFlatAttendance(buffer, req.user._id);
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
+
+  if (mode === 'month') {
+    const month = parseInt(req.body.month, 10);
+    const year = parseInt(req.body.year, 10);
+    if (!(month >= 1 && month <= 12) || !(year >= 2000 && year <= 2100)) {
+      throw new ApiError(400, 'Select a valid month (1–12) and year for monthly upload');
+    }
+    const mirus = parseMirusAttendanceWorkbook(buffer, { month, year });
+    if (mirus.format !== 'mirus') {
       throw new ApiError(
         400,
-        'Unrecognized attendance spreadsheet. Upload the Mirus Staff Attendance file (Emp.Id, daily P/A/L) or the flat employeeId/date/status sample.'
+        'Monthly upload expects a Mirus Staff Attendance sheet (Emp.Id + weekday headers with day numbers below, marks P/A/L).'
       );
     }
+    results = await importMirusAttendance(mirus, req.user._id);
+    results.mode = 'month';
+    results.period = { month, year };
+  } else {
+    const dateKey = String(req.body.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      throw new ApiError(400, 'Select a valid date (YYYY-MM-DD) for single-day upload');
+    }
+    const [ys, ms, ds] = dateKey.split('-').map(Number);
+    const day = ds;
+    const month = ms;
+    const year = ys;
+
+    // Prefer a simple Emp.Id + Status sheet for one day; else Mirus matrix for that day column.
+    const flatDay = parseSingleDayAttendanceWorkbook(buffer, dateKey);
+    if (flatDay.format === 'single-day' && flatDay.marks.length) {
+      results = await importMirusAttendance(flatDay, req.user._id);
+    } else {
+      const mirus = parseMirusAttendanceWorkbook(buffer, { month, year, onlyDay: day });
+      if (mirus.format === 'mirus' && (mirus.marks.length || mirus.errors.length)) {
+        results = await importMirusAttendance(mirus, req.user._id);
+      } else if (flatDay.errors.length) {
+        throw new ApiError(
+          400,
+          flatDay.errors[0]?.error
+            || 'Single-day upload expects Emp.Id + Status columns, or a Mirus sheet containing that day.'
+        );
+      } else {
+        throw new ApiError(
+          400,
+          'Single-day upload expects Emp.Id + Status columns, or a Mirus monthly sheet with that day column.'
+        );
+      }
+    }
+    results.mode = 'day';
+    results.period = { date: dateKey };
   }
 
   const skipNote = results.skippedEmpty
@@ -323,8 +383,12 @@ export const listAttendance = asyncHandler(async (req, res) => {
 export const applyLeave = asyncHandler(async (req, res) => {
   const { type, fromDate, toDate, days, reason } = req.body;
   if (!type || !fromDate || !toDate) throw new ApiError(400, 'type, fromDate and toDate are required');
-  const from = new Date(fromDate);
-  const to = new Date(toDate);
+  // Store as UTC calendar days so list filters match date-picker values in any TZ.
+  const from = utcDayStart(fromDate);
+  const to = utcDayStart(toDate);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    throw new ApiError(400, 'fromDate and toDate must be valid dates');
+  }
   if (to < from) throw new ApiError(400, 'toDate cannot be before fromDate');
   const computedDays = days || (Math.round((to - from) / 86400000) + 1);
 
@@ -347,11 +411,10 @@ export const listLeaves = asyncHandler(async (req, res) => {
   if (req.query.type) filter.type = req.query.type;
   if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) filter.userId = req.query.userId;
 
-  // Overlap with [from, to]: leave.fromDate <= to AND leave.toDate >= from
+  // Overlap with [from, to]: leave.fromDate <= endOf(to) AND leave.toDate >= startOf(from)
   if (req.query.from || req.query.to) {
-    const from = req.query.from ? new Date(req.query.from) : new Date('1970-01-01');
-    const to = req.query.to ? new Date(req.query.to) : new Date('2999-12-31');
-    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ''))) to.setUTCHours(23, 59, 59, 999);
+    const from = req.query.from ? utcDayStart(req.query.from) : new Date(Date.UTC(1970, 0, 1));
+    const to = req.query.to ? utcDayEnd(req.query.to) : new Date(Date.UTC(2999, 11, 31, 23, 59, 59, 999));
     filter.fromDate = { $lte: to };
     filter.toDate = { $gte: from };
   }

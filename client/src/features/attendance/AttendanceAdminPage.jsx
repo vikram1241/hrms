@@ -20,9 +20,20 @@ import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 import AttendanceRegister from './AttendanceRegister.jsx';
 import LeavesRegister from './LeavesRegister.jsx';
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+};
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const STATUSES = ['Present', 'Absent', 'Half-Day', 'Leave', 'WeekOff', 'Holiday'];
+const MONTH_OPTIONS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+const yearOptions = () => {
+  const y = new Date().getFullYear();
+  return [y - 1, y, y + 1];
+};
 
 export default function AttendanceAdminPage() {
   const dispatch = useDispatch();
@@ -32,6 +43,10 @@ export default function AttendanceAdminPage() {
   const [att, setAtt] = useState({ userId: '', date: today(), status: 'Present' });
   const [bulk, setBulk] = useState({ userIds: [], date: today(), status: 'Present' });
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [uploadMode, setUploadMode] = useState('month'); // month | day
+  const [uploadMonth, setUploadMonth] = useState(new Date().getMonth() + 1);
+  const [uploadYear, setUploadYear] = useState(new Date().getFullYear());
+  const [uploadDate, setUploadDate] = useState(today());
   const [hol, setHol] = useState({ date: today(), name: '' });
   const [registerKey, setRegisterKey] = useState(0);
 
@@ -59,9 +74,19 @@ export default function AttendanceAdminPage() {
 
   const importXlsx = async (file) => {
     if (!file) return;
+    if (uploadMode === 'month') {
+      if (!(uploadMonth >= 1 && uploadMonth <= 12) || !uploadYear) {
+        return dispatch(notifyError('Select month and year before uploading.'));
+      }
+    } else if (!uploadDate) {
+      return dispatch(notifyError('Select a date before uploading.'));
+    }
     setBulkBusy(true);
     try {
-      const res = await bulkUploadAttendance(file);
+      const period = uploadMode === 'day'
+        ? { mode: 'day', date: uploadDate }
+        : { mode: 'month', month: uploadMonth, year: uploadYear };
+      const res = await bulkUploadAttendance(file, period);
       dispatch(notifySuccess(res.message || 'Attendance imported.'));
       if (res.failed?.length) dispatch(notifyError(`${res.failed.length} row(s) failed — check employee IDs.`));
       setRegisterKey((k) => k + 1);
@@ -83,9 +108,9 @@ export default function AttendanceAdminPage() {
 
       <AttendanceRegister key={`att-${registerKey}`} employees={employees} />
       <LeavesRegister
-        key={`lv-${registerKey}`}
         onDecided={(status) => {
           dispatch(notifySuccess(`Leave ${status.toLowerCase()}.`));
+          // Refresh attendance matrix only — do not remount leave filters.
           setRegisterKey((k) => k + 1);
         }}
       />
@@ -136,20 +161,79 @@ export default function AttendanceAdminPage() {
               <Button onClick={saveBulk} loading={bulkBusy}>Mark {bulk.userIds.length || ''} attendance</Button>
             </div>
 
-            <div className="space-y-1.5 border-t border-line pt-3 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-1.5 font-medium text-primary-600 hover:underline">
-                  <Upload size={13} /> Import from Excel
-                  <input type="file" accept=".xlsx,.xls" hidden onChange={(e) => { importXlsx(e.target.files?.[0]); e.target.value = ''; }} />
+            <div className="space-y-2 border-t border-line pt-3 text-xs">
+              <p className="text-sm font-semibold text-ink">Import from Excel</p>
+              <TextField
+                select size="small" fullWidth label="Upload type"
+                value={uploadMode}
+                onChange={(e) => setUploadMode(e.target.value)}
+              >
+                <MenuItem value="month">Monthly attendance (month + year)</MenuItem>
+                <MenuItem value="day">Single day attendance (specific date)</MenuItem>
+              </TextField>
+
+              {uploadMode === 'month' ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <TextField
+                    select size="small" label="Month"
+                    value={uploadMonth}
+                    onChange={(e) => setUploadMonth(Number(e.target.value))}
+                  >
+                    {MONTH_OPTIONS.map((label, i) => (
+                      <MenuItem key={label} value={i + 1}>{label}</MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    select size="small" label="Year"
+                    value={uploadYear}
+                    onChange={(e) => setUploadYear(Number(e.target.value))}
+                  >
+                    {yearOptions().map((y) => (
+                      <MenuItem key={y} value={y}>{y}</MenuItem>
+                    ))}
+                  </TextField>
+                </div>
+              ) : (
+                <TextField
+                  type="date" size="small" fullWidth label="Date"
+                  InputLabelProps={{ shrink: true }}
+                  value={uploadDate}
+                  onChange={(e) => setUploadDate(e.target.value)}
+                />
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <label className={`inline-flex cursor-pointer items-center gap-1.5 font-medium text-primary-600 hover:underline ${bulkBusy ? 'pointer-events-none opacity-50' : ''}`}>
+                  <Upload size={13} /> {bulkBusy ? 'Importing…' : 'Choose .xls / .xlsx'}
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    hidden
+                    disabled={bulkBusy}
+                    onChange={(e) => { importXlsx(e.target.files?.[0]); e.target.value = ''; }}
+                  />
                 </label>
-                <a className="inline-flex items-center gap-1.5 text-muted hover:text-primary-600" href="/samples/bulk-attendance-sample.xlsx" download>
-                  <Download size={13} /> Sample .xlsx
+                <a
+                  className="inline-flex items-center gap-1.5 text-muted hover:text-primary-600"
+                  href={uploadMode === 'day' ? '/samples/bulk-attendance-day-sample.xlsx' : '/samples/bulk-attendance-sample.xlsx'}
+                  download
+                >
+                  <Download size={13} /> Sample
                 </a>
               </div>
               <p className="text-muted">
-                Accepts <strong>Mirus Staff Attendance</strong> (.xls/.xlsx): Emp.Id, Name, Contact,
-                daily marks <strong>P</strong> present, <strong>A</strong> absent, <strong>L</strong> leave;
-                empty cells are skipped.
+                {uploadMode === 'month' ? (
+                  <>
+                    Upload the <strong>Mirus Staff Attendance</strong> matrix for the selected month/year.
+                    Row 2 = weekday shorts (WED, THUR…), row 3 = day numbers, marks <strong>P</strong>/<strong>A</strong>/<strong>L</strong>; empty cells skipped.
+                    UI month/year is used for dating (not the sheet title).
+                  </>
+                ) : (
+                  <>
+                    Upload Emp.Id + Status for the selected date (P/A/L or Present/Absent/Leave),
+                    or a Mirus monthly sheet — only that day’s column is imported.
+                  </>
+                )}
               </p>
             </div>
           </div>

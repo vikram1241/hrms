@@ -953,6 +953,15 @@ export const generateOfferLetterPdf = async ({
     { text: 'Travel / Conveyance: ', bold: true },
     { text: 'Reimbursement of actual expenses as per Company policy (with supporting bills).', bold: false }
   ], { size: 10, gap: 18 });
+  // Field travel allowance — not applicable to HR / Admin office roles.
+  const offerRoleKey = `${position || ''} ${department || ''}`.toLowerCase();
+  const hideOtherAllowance = /\b(hr|admin|administrator|human\s*resources?)\b/.test(offerRoleKey);
+  if (!hideOtherAllowance) {
+    writeRich([
+      { text: 'Other allowance: ', bold: true },
+      { text: 'Per Km Rs 3.50, Daily Rs 320, Outstation Rs 520', bold: false }
+    ], { size: 10, gap: 18 });
+  }
 
   writeRich([
     { text: '4. Probation Period: ', bold: true },

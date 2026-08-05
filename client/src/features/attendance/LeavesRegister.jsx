@@ -12,27 +12,31 @@ import useAsync from '../../hooks/useAsync.js';
 import useClientPager from '../../hooks/useClientPager.js';
 import { listLeaves, decideLeave } from '../../api/attendance.js';
 import { notifyError } from '../ui/toastSlice.js';
-import { userDisplayName, toDateKey } from './dateHelpers.js';
+import { userDisplayName, pad2 } from './dateHelpers.js';
 
 const LEAVE_TYPES = ['Casual', 'Sick', 'Earned', 'Unpaid', 'Maternity', 'Other'];
 const LEAVE_STATUSES = ['Pending', 'Approved', 'Rejected', 'Cancelled'];
 
-const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '—');
 
-const now = new Date();
-const monthStart = () => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-const today = () => toDateKey(now);
+const monthStartKey = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
+const monthEndKey = (d = new Date()) => {
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(last)}`;
+};
 
 /**
  * Admin leaves register with filters + inline approve/reject for Pending rows.
+ * Date range is optional — empty From/To lists all requests (including future leave).
  */
 export default function LeavesRegister({ onDecided }) {
   const dispatch = useDispatch();
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState('Pending');
   const [type, setType] = useState('');
   const [userId, setUserId] = useState('');
-  const [from, setFrom] = useState(monthStart());
-  const [to, setTo] = useState(today());
+  // Empty by default so future-dated pending leave always appears for approval.
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [busyId, setBusyId] = useState(null);
 
   const params = useMemo(() => ({
@@ -66,12 +70,21 @@ export default function LeavesRegister({ onDecided }) {
     return s;
   }, [rows]);
 
+  const setThisMonth = () => {
+    const n = new Date();
+    setFrom(monthStartKey(n));
+    setTo(monthEndKey(n));
+  };
+  const clearDates = () => { setFrom(''); setTo(''); };
+
   return (
     <Card className="mb-4">
       <CardBody>
         <div className="mb-3">
           <h3 className="text-base font-semibold text-ink">Leaves register</h3>
-          <p className="text-xs text-muted">Filter leave requests by employee, type, status and date range.</p>
+          <p className="text-xs text-muted">
+            Approve or reject leave requests. Leave date filters empty to include future-dated leave; use This month only when you want a period view.
+          </p>
         </div>
 
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -88,11 +101,13 @@ export default function LeavesRegister({ onDecided }) {
           <EmployeeSelect value={userId} onChange={setUserId} emptyLabel="All employees" />
         </div>
 
-        <div className="mb-3 flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-800">Pending: {summary.Pending}</span>
-          <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">Approved: {summary.Approved}</span>
-          <span className="rounded-full bg-rose-50 px-2.5 py-1 font-medium text-rose-800">Rejected: {summary.Rejected}</span>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">Cancelled: {summary.Cancelled}</span>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={clearDates}>All dates</button>
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={setThisMonth}>This month</button>
+          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">Pending: {summary.Pending}</span>
+          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">Approved: {summary.Approved}</span>
+          <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-800">Rejected: {summary.Rejected}</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Cancelled: {summary.Cancelled}</span>
         </div>
 
         {leaves.loading ? (
