@@ -176,17 +176,22 @@ function RowEditor({
   addHint,
   showBalanceAmount = false,
   balanceAmount = 0,
-  allowRemoveBalance = false
+  allowRemoveBalance = false,
+  /** When true (earnings only), keep a locked Special Allowance / Balance of CTC row. */
+  withBalanceRow = false
 }) {
+  const finalize = (next) => onChange(withBalanceRow ? ensureSpecialAllowance(next) : next.filter((r) => !isBalanceRow(r)));
+
   const updateAt = (i, patch) => {
-    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    finalize(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   };
 
   const onType = (i, calculationType) => {
     const r = rows[i];
     if (r.lockedBalance) return; // Special Allowance type is fixed
+    // Balance of CTC is earnings-only — never allow it on deductions.
     if (calculationType === 'balance_of_ctc') {
-      // Only one balance row — convert this row and drop others' balance type
+      if (!withBalanceRow) return;
       const next = rows.map((row, idx) => {
         if (idx === i) return { ...row, calculationType, percent: '', amount: '', lockedBalance: true };
         if (isBalanceRow(row)) {
@@ -194,7 +199,7 @@ function RowEditor({
         }
         return row;
       });
-      return onChange(ensureSpecialAllowance(next));
+      return finalize(next);
     }
     if (calculationType === 'fixed') {
       return updateAt(i, { calculationType, percent: '', amount: r.amount });
@@ -241,7 +246,7 @@ function RowEditor({
           title={canAdd ? 'Add field' : addHint}
           onClick={() => {
             const withoutBalance = rows.filter((r) => !isBalanceRow(r));
-            onChange(ensureSpecialAllowance([...withoutBalance, emptyRow()]));
+            finalize([...withoutBalance, emptyRow()]);
           }}
         >
           <Plus size={14} /> Add field
@@ -320,7 +325,7 @@ function RowEditor({
                 disabled={r.lockedBalance && !allowRemoveBalance}
                 onClick={() => {
                   if (r.lockedBalance) return;
-                  onChange(ensureSpecialAllowance(rows.filter((_, idx) => idx !== i)));
+                  finalize(rows.filter((_, idx) => idx !== i));
                 }}
                 aria-label="Remove field"
                 title={r.lockedBalance ? 'Special Allowance is required' : 'Remove field'}
@@ -470,17 +475,21 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
     setAnnualCtc(raw);
     const monthly = num(raw) > 0 ? num(raw) / 12 : 0;
     if (monthly <= 0) return;
-    setEarnings((prev) => refreshEarnings(prev, monthly));
-    setDeductions((prev) => {
-      const basic = basicAmountOf(earnings);
-      return prev.map((r) => {
+    // Recompute earnings first, then cascade deductions from that Basic.
+    // Using stale `earnings` here made PF/%-of-basic use the previous CTC's
+    // Basic (e.g. typing 600000 left PF on Basic from 60000 → ₹200 instead of ₹2000).
+    setEarnings((prev) => {
+      const next = refreshEarnings(prev, monthly);
+      const basic = basicAmountOf(next);
+      setDeductions((dPrev) => dPrev.map((r) => {
         if (r.calculationType === 'fixed' || isBalanceRow(r)) return r;
         if (r.percent === '' || r.percent == null) return r;
         return {
           ...r,
           amount: amountFromPercent(r.calculationType, r.percent, monthly, basic)
         };
-      });
+      }));
+      return next;
     });
   };
 
@@ -501,9 +510,11 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
   const toStoredRow = (row) => {
     const type = isBalanceRow(row) ? 'balance_of_ctc' : row.calculationType;
     const label = String(row.label || '').trim();
+    // Keep engine-compatible basic key (salaryEngine resolves % of Basic via "basic").
+    const key = isBasicRow(row) ? 'basic' : (keyFromLabel(label) || 'field');
     if (type === 'fixed') {
       return {
-        key: keyFromLabel(label),
+        key,
         label,
         calculationType: type,
         valueFactor: Math.round(num(row.amount) * 100)
@@ -513,7 +524,7 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
       return { key: keyFromLabel(label) || 'special_allowance', label, calculationType: type, valueFactor: 0 };
     }
     return {
-      key: keyFromLabel(label),
+      key,
       label,
       calculationType: type,
       valueFactor: num(row.percent)
@@ -553,7 +564,10 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
         name,
         description,
         earningsStructure: ensureUniqueKeys(withSpecial.map(toStoredRow)),
-        deductionsStructure: ensureUniqueKeys(deductions.map(toStoredRow))
+        // Balance of CTC must never appear under deductions (zeros Net Take Home).
+        deductionsStructure: ensureUniqueKeys(
+          deductions.filter((r) => !isBalanceRow(r)).map(toStoredRow)
+        )
       };
       if (template) await updateTemplate(template._id, body);
       else await createTemplate(body);
@@ -633,6 +647,7 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
             addHint="Enter Annual CTC above before adding fields."
             showBalanceAmount
             balanceAmount={ctcSummary.specialAmount}
+            withBalanceRow
           />
           <CtcAllocationMeter summary={ctcSummary} />
         </div>
@@ -645,6 +660,7 @@ export default function TemplateDialog({ open, template, onClose, onSaved }) {
           basicAmt={basicAmt}
           canAdd={canAddFields}
           addHint="Enter Annual CTC above before adding fields."
+          withBalanceRow={false}
         />
 
         <p className="text-xs text-muted">

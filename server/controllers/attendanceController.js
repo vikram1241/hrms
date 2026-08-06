@@ -164,7 +164,8 @@ const importMirusAttendance = async (parsed, markedBy) => {
     format: 'mirus',
     imported: [],
     failed: [...parsed.errors],
-    skippedEmpty: parsed.skippedEmpty,
+    skippedEmpty: parsed.skippedEmpty || 0,
+    skippedSunday: parsed.skippedSunday || 0,
     sheets: parsed.sheets
   };
 
@@ -307,6 +308,9 @@ export const bulkUploadAttendance = asyncHandler(async (req, res) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
       throw new ApiError(400, 'Select a valid date (YYYY-MM-DD) for single-day upload');
     }
+    if (new Date(`${dateKey}T00:00:00.000Z`).getUTCDay() === 0) {
+      throw new ApiError(400, 'Sundays are blocked for attendance import. Choose another date.');
+    }
     const [ys, ms, ds] = dateKey.split('-').map(Number);
     const day = ds;
     const month = ms;
@@ -337,9 +341,10 @@ export const bulkUploadAttendance = asyncHandler(async (req, res) => {
     results.period = { date: dateKey };
   }
 
-  const skipNote = results.skippedEmpty
-    ? `, skipped ${results.skippedEmpty} empty day cell(s)`
-    : '';
+  const skipParts = [];
+  if (results.skippedEmpty) skipParts.push(`${results.skippedEmpty} empty cell(s) unchanged`);
+  if (results.skippedSunday) skipParts.push(`${results.skippedSunday} Sunday mark(s) blocked`);
+  const skipNote = skipParts.length ? `, skipped ${skipParts.join(', ')}` : '';
   res.status(201).json({
     success: true,
     message: `Imported ${results.imported.length}, failed ${results.failed.length}${skipNote}`,

@@ -66,6 +66,10 @@ services:
       context: ./client
       dockerfile: Dockerfile
     container_name: hrms-client
+    # Publish nginx to the host — `expose` alone is internal-only and
+    # does not make http://localhost:80 reachable from the browser.
+    ports:
+      - "80:80"
     expose:
       - "80"
     depends_on:

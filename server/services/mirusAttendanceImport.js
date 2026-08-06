@@ -12,7 +12,8 @@
  *   2) Sheet body — Month/Year columns or title text
  *   3) Tab month-only + year from body
  *
- * Empty day cells are omitted (not imported).
+ * Empty / blank-like day cells are omitted (not imported — attendance left unchanged).
+ * Sunday columns and calendar Sundays are blocked (never imported).
  */
 
 import * as XLSX from 'xlsx';
@@ -27,11 +28,28 @@ const MONTHS = {
 const MONTH_NAME_RE = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec';
 const WEEKDAY_RE = /^(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)\.?$/i;
 
+/** Header token → JS getUTCDay() (0=Sun … 6=Sat). */
+const WEEKDAY_UTC = {
+  SUN: 0,
+  MON: 1,
+  TUE: 2,
+  TUES: 2,
+  WED: 3,
+  THU: 4,
+  THUR: 4,
+  THURS: 4,
+  FRI: 5,
+  SAT: 6
+};
+
 const STATUS_MAP = {
   P: 'Present',
   A: 'Absent',
   L: 'Leave'
 };
+
+/** Cell values that mean "no mark" — do not create/update attendance. */
+const EMPTY_MARK_RE = /^(?:|-|\.|—|–|na|n\/?a|nil|null|none|#n\/?a)$/i;
 
 const norm = (v) => String(v ?? '').trim();
 const normUpper = (v) => norm(v).toUpperCase();
@@ -46,6 +64,17 @@ const cellStr = (row, idx) => {
     return String(v);
   }
   return String(v).trim();
+};
+
+const isEmptyMark = (raw) => {
+  const s = norm(raw);
+  if (!s) return true;
+  return EMPTY_MARK_RE.test(s);
+};
+
+const weekdayToken = (hdr) => {
+  const t = normUpper(hdr).replace(/\./g, '');
+  return WEEKDAY_UTC[t] != null ? t : null;
 };
 
 const normalizeYear = (y) => {
@@ -190,9 +219,16 @@ export const parseMirusAttendanceSheet = (rows, sheetName = '', options = {}) =>
   const marks = [];
   const errors = [];
   let skippedEmpty = 0;
+  let skippedSunday = 0;
 
   if (!isMirusAttendanceSheet(rows, { minDays: 1 })) {
-    return { marks, skippedEmpty, errors: [{ sheet: sheetName, error: 'Not a Mirus attendance sheet' }], meta: null };
+    return {
+      marks,
+      skippedEmpty,
+      skippedSunday,
+      errors: [{ sheet: sheetName, error: 'Not a Mirus attendance sheet' }],
+      meta: null
+    };
   }
 
   const header = rows[1] || [];
@@ -204,7 +240,7 @@ export const parseMirusAttendanceSheet = (rows, sheetName = '', options = {}) =>
       sheet: sheetName,
       error: 'Could not determine month/year. Select month & year in the UI, or name the tab like july-2026.'
     });
-    return { marks, skippedEmpty, errors, meta: null };
+    return { marks, skippedEmpty, skippedSunday, errors, meta: null };
   }
 
   const empCol = findCol(header, [/^emp\.?\s*id$/, /employee\s*id/, /^emp\s*id/]);
@@ -213,7 +249,7 @@ export const parseMirusAttendanceSheet = (rows, sheetName = '', options = {}) =>
 
   if (empCol < 0) {
     errors.push({ sheet: sheetName, error: 'Emp.Id column not found' });
-    return { marks, skippedEmpty, errors, meta: null };
+    return { marks, skippedEmpty, skippedSunday, errors, meta: null };
   }
 
   const dim = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -231,18 +267,43 @@ export const parseMirusAttendanceSheet = (rows, sheetName = '', options = {}) =>
     if (day > dim) continue;
     if (onlyDay != null && day !== onlyDay) continue;
 
-    // Prefer columns that have a weekday header; still accept bare day numbers
-    dayCols.push({ col: c, day, weekday: isWeekdayHeader(hdr) ? hdr : null });
+    const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const utcDow = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+    const wd = weekdayToken(hdr);
+
+    // Block Sundays (header SUN or calendar Sunday) — never import.
+    if (wd === 'SUN' || utcDow === 0) {
+      dayCols.push({ col: c, day, dateKey, weekday: wd, blockedSunday: true });
+      continue;
+    }
+
+    // Soft check: weekday header should match the calendar day for UI month/year.
+    if (wd && WEEKDAY_UTC[wd] !== utcDow) {
+      errors.push({
+        sheet: sheetName,
+        day,
+        error: `Weekday header ${wd} does not match ${dateKey} (check selected month/year)`
+      });
+      continue;
+    }
+
+    dayCols.push({ col: c, day, dateKey, weekday: wd, blockedSunday: false });
   }
 
-  if (!dayCols.length) {
+  if (!dayCols.some((d) => !d.blockedSunday)) {
     errors.push({
       sheet: sheetName,
       error: onlyDay != null
-        ? `No column found for day ${onlyDay} in ${year}-${String(month).padStart(2, '0')}`
-        : 'No day-number columns found on row 3 under weekday headers'
+        ? `No importable column found for day ${onlyDay} in ${year}-${String(month).padStart(2, '0')} (Sundays are blocked)`
+        : 'No day-number columns found on row 3 under weekday headers (Sundays are blocked)'
     });
-    return { marks, skippedEmpty, errors, meta: { month, year, source: resolved.source } };
+    return {
+      marks,
+      skippedEmpty,
+      skippedSunday,
+      errors,
+      meta: { month, year, source: resolved.source }
+    };
   }
 
   for (let r = 3; r < rows.length; r += 1) {
@@ -253,12 +314,18 @@ export const parseMirusAttendanceSheet = (rows, sheetName = '', options = {}) =>
     const name = nameCol >= 0 ? cellStr(row, nameCol) : '';
     const phone = phoneCol >= 0 ? cellStr(row, phoneCol) : '';
 
-    for (const { col, day } of dayCols) {
-      const raw = normUpper(cellStr(row, col));
-      if (!raw) {
+    for (const { col, day, dateKey, blockedSunday } of dayCols) {
+      const rawCell = cellStr(row, col);
+      if (isEmptyMark(rawCell)) {
         skippedEmpty += 1;
+        continue; // leave attendance unchanged for this date
+      }
+      if (blockedSunday) {
+        skippedSunday += 1;
         continue;
       }
+
+      const raw = normUpper(rawCell);
       const status = STATUS_MAP[raw];
       if (!status) {
         errors.push({
@@ -266,11 +333,10 @@ export const parseMirusAttendanceSheet = (rows, sheetName = '', options = {}) =>
           row: r + 1,
           empId,
           day,
-          error: `Unknown mark "${raw}" (use P, A, or L)`
+          error: `Unknown mark "${raw}" (use P, A, or L; leave blank for no update)`
         });
         continue;
       }
-      const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       marks.push({
         sheet: sheetName,
         row: r + 1,
@@ -288,12 +354,14 @@ export const parseMirusAttendanceSheet = (rows, sheetName = '', options = {}) =>
   return {
     marks,
     skippedEmpty,
+    skippedSunday,
     errors,
     meta: {
       month,
       year,
       sheet: sheetName,
-      dayColumns: dayCols.length,
+      dayColumns: dayCols.filter((d) => !d.blockedSunday).length,
+      sundayColumnsBlocked: dayCols.filter((d) => d.blockedSunday).length,
       source: resolved.source,
       onlyDay: onlyDay || null
     }
@@ -310,6 +378,7 @@ export const parseMirusAttendanceWorkbook = (buffer, options = {}) => {
   const allMarks = [];
   const allErrors = [];
   let skippedEmpty = 0;
+  let skippedSunday = 0;
   const sheets = [];
 
   for (const sheetName of wb.SheetNames) {
@@ -322,16 +391,18 @@ export const parseMirusAttendanceWorkbook = (buffer, options = {}) => {
     allMarks.push(...parsed.marks);
     allErrors.push(...parsed.errors);
     skippedEmpty += parsed.skippedEmpty;
+    skippedSunday += parsed.skippedSunday || 0;
   }
 
   if (!sheets.length) {
-    return { format: null, marks: [], skippedEmpty: 0, errors: [], sheets: [] };
+    return { format: null, marks: [], skippedEmpty: 0, skippedSunday: 0, errors: [], sheets: [] };
   }
 
   return {
     format: 'mirus',
     marks: allMarks,
     skippedEmpty,
+    skippedSunday,
     errors: allErrors,
     sheets
   };

@@ -44,6 +44,40 @@ test('rejects non-positive CTC', () => {
   assert.throws(() => computeBreakdown(template, 0), /positive/);
 });
 
+test('HRA % of Basic works when basic key is basic_pay', () => {
+  const tpl = {
+    earningsStructure: [
+      { key: 'basic_pay', label: 'Basic Pay', calculationType: 'percentage_of_ctc', valueFactor: 45 },
+      { key: 'hra', label: 'HRA', calculationType: 'percentage_of_basic', valueFactor: 50 },
+      { key: 'special_allowance', label: 'Special Allowance', calculationType: 'balance_of_ctc', valueFactor: 0 }
+    ],
+    deductionsStructure: [
+      { key: 'pf', label: 'PF', calculationType: 'percentage_of_basic', valueFactor: 12 }
+    ]
+  };
+  const b = computeBreakdown(tpl, rupeesToPaisa(1200000));
+  assert.equal(b.earnings.find((e) => e.key === 'hra').monthlyAmount, 2250000);
+  assert.equal(b.netTakeHome, 10000000 - 540000);
+});
+
+test('balance_of_ctc in deductions is ignored so Net is not zeroed', () => {
+  const tpl = {
+    earningsStructure: [
+      { key: 'basic', label: 'Basic', calculationType: 'percentage_of_ctc', valueFactor: 50 },
+      { key: 'special', label: 'Special Allowance', calculationType: 'balance_of_ctc', valueFactor: 0 }
+    ],
+    deductionsStructure: [
+      { key: 'pf', label: 'Provident Fund', calculationType: 'percentage_of_basic', valueFactor: 12 },
+      // Accidental Special Allowance under deductions (UI Add-field bug)
+      { key: 'special_allowance', label: 'Special Allowance', calculationType: 'balance_of_ctc', valueFactor: 0 }
+    ]
+  };
+  const b = computeBreakdown(tpl, rupeesToPaisa(2500000)); // monthly ≈ 208333.33
+  assert.equal(b.deductions.length, 1);
+  assert.ok(b.netTakeHome > 0);
+  assert.equal(b.grossEarnings - b.totalDeductions, b.netTakeHome);
+});
+
 test('formatINR uses Indian grouping', () => {
   assert.equal(formatINR(9440000), 'INR 94,400.00');
   assert.equal(formatINR(rupeesToPaisa(1234567)), 'INR 12,34,567.00');

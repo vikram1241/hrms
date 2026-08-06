@@ -39,8 +39,9 @@ const computeBlock = (fields = [], monthlyCTC, basicAmount) => {
     }
   }
 
-  // The block's own "basic" (if present) overrides the passed-in reference.
-  const localBasic = amounts.has('basic') ? amounts.get('basic') : basicAmount;
+  // Basic may be keyed "basic" or "basic_pay" (UI derives keys from labels).
+  const basicEntry = [...amounts.entries()].find(([k]) => k === 'basic' || /^basic/i.test(k));
+  const localBasic = basicEntry ? basicEntry[1] : basicAmount;
 
   // Pass 2 — percentage_of_basic.
   for (const f of fields) {
@@ -49,8 +50,8 @@ const computeBlock = (fields = [], monthlyCTC, basicAmount) => {
     }
   }
 
-  // Pass 3 — balance_of_ctc (only meaningful for earnings).
-  // Absorbs every leftover paisa so Σ earnings === monthlyCTC exactly.
+  // Pass 3 — balance_of_ctc (earnings only). Never apply on deductions — that
+  // would set a line to ~monthlyCTC − other deductions and zero Net Take Home.
   for (const f of fields) {
     if (f.calculationType === 'balance_of_ctc') {
       const allocated = [...amounts.values()].reduce((s, v) => s + v, 0);
@@ -123,7 +124,10 @@ export const computeBreakdown = (template, annualCTCPaisa) => {
 
   const basic = earnings.find((e) => e.key === 'basic' || /^basic/i.test(e.key || e.label || ''))
     ?.monthlyAmount ?? 0;
-  const deductions = computeBlock(template.deductionsStructure, monthlyCTC, basic);
+  // Strip accidental Balance-of-CTC rows from deductions (UI bug / bad data).
+  const deductionsStructure = (template.deductionsStructure || [])
+    .filter((f) => f.calculationType !== 'balance_of_ctc');
+  const deductions = computeBlock(deductionsStructure, monthlyCTC, basic);
 
   const grossEarnings = sum(earnings);
   const totalDeductions = sum(deductions);

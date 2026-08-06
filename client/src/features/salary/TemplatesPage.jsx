@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
-import { Plus, Pencil, Power, SlidersHorizontal } from 'lucide-react';
+import { Plus, Pencil, Power, Trash2, SlidersHorizontal } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -15,7 +15,7 @@ import LetterTemplatesSection from './LetterTemplatesSection.jsx';
 import CFTemplatesSection from './CFTemplatesSection.jsx';
 import JobRolesSection from './JobRolesSection.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { listTemplates, deactivateTemplate } from '../../api/salary.js';
+import { listTemplates, deactivateTemplate, deleteInactiveTemplate } from '../../api/salary.js';
 import { CALC_TYPES } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
@@ -35,6 +35,7 @@ export default function TemplatesPage() {
   const { data: templates, loading, reload } = useAsync(() => listTemplates(), []);
   const [dialog, setDialog] = useState({ open: false, template: null });
   const [deactivateTarget, setDeactivateTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const onDeactivate = async () => {
@@ -43,6 +44,20 @@ export default function TemplatesPage() {
       await deactivateTemplate(deactivateTarget._id);
       dispatch(notifySuccess('Template deactivated.'));
       setDeactivateTarget(null);
+      reload();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDelete = async () => {
+    setBusy(true);
+    try {
+      await deleteInactiveTemplate(deleteTarget._id);
+      dispatch(notifySuccess('Inactive template deleted.'));
+      setDeleteTarget(null);
       reload();
     } catch (err) {
       dispatch(notifyError(err.uiMessage));
@@ -116,7 +131,15 @@ export default function TemplatesPage() {
 
                 <div className="mt-4 flex justify-end gap-2 border-t border-line pt-3">
                   <Button variant="secondary" size="sm" onClick={() => setDialog({ open: true, template: t })}><Pencil size={14} /> Edit</Button>
-                  {t.isActive && <Button variant="ghost" size="sm" className="text-danger" onClick={() => setDeactivateTarget(t)}><Power size={14} /> Deactivate</Button>}
+                  {t.isActive ? (
+                    <Button variant="ghost" size="sm" className="text-danger" onClick={() => setDeactivateTarget(t)}>
+                      <Power size={14} /> Deactivate
+                    </Button>
+                  ) : (
+                    <Button variant="ghost" size="sm" className="text-danger" onClick={() => setDeleteTarget(t)}>
+                      <Trash2 size={14} /> Delete
+                    </Button>
+                  )}
                 </div>
               </CardBody>
             </Card>
@@ -129,6 +152,13 @@ export default function TemplatesPage() {
         open={Boolean(deactivateTarget)} onClose={() => setDeactivateTarget(null)} onConfirm={onDeactivate} loading={busy}
         title="Deactivate template?" confirmLabel="Deactivate"
         message="It will no longer be selectable for new assignments. Deactivation is blocked if any employee still has this template assigned — reassign them first."
+      />
+      <ConfirmDialog
+        open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onConfirm={onDelete} loading={busy}
+        title="Delete inactive template?" confirmLabel="Delete permanently"
+        message={deleteTarget
+          ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone. Delete is blocked if any employee still has this template assigned.`
+          : ''}
       />
     </div>
   );

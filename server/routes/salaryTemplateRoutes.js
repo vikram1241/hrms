@@ -4,7 +4,8 @@ import {
   listTemplates,
   getTemplate,
   updateTemplate,
-  deactivateTemplate
+  deactivateTemplate,
+  deleteInactiveTemplate
 } from '../controllers/salaryTemplateController.js';
 import { verifyToken, requirePermission } from '../middleware/authMiddleware.js';
 import { PERMISSIONS } from '../config/permissions.js';
@@ -18,6 +19,7 @@ router.post('/', createTemplateRules, validate, createTemplate);
 router.get('/', listTemplates);
 router.get('/:id', getTemplate);
 router.put('/:id', updateTemplateRules, validate, updateTemplate);
+router.delete('/:id/permanent', deleteInactiveTemplate);
 router.delete('/:id', deactivateTemplate);
 
 export default router;

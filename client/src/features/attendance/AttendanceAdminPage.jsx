@@ -225,13 +225,15 @@ export default function AttendanceAdminPage() {
                 {uploadMode === 'month' ? (
                   <>
                     Upload the <strong>Mirus Staff Attendance</strong> matrix for the selected month/year.
-                    Row 2 = weekday shorts (WED, THUR…), row 3 = day numbers, marks <strong>P</strong>/<strong>A</strong>/<strong>L</strong>; empty cells skipped.
-                    UI month/year is used for dating (not the sheet title).
+                    Row 2 = weekday shorts (WED, THUR…), row 3 = day numbers; marks <strong>P</strong>/<strong>A</strong>/<strong>L</strong> only.
+                    Empty / blank cells do not update attendance. Sundays are blocked and never imported.
+                    Select the correct month/year so weekdays line up with the sheet.
                   </>
                 ) : (
                   <>
                     Upload Emp.Id + Status for the selected date (P/A/L or Present/Absent/Leave),
                     or a Mirus monthly sheet — only that day’s column is imported.
+                    Empty status leaves attendance unchanged; Sundays are blocked.
                   </>
                 )}
               </p>

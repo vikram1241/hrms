@@ -82,6 +82,20 @@ test('cannot deactivate a template assigned to an employee', async () => {
   assert.equal(still.body.template.isActive, true);
 });
 
+test('inactive template can be permanently deleted when unused', async () => {
+  const { agent } = await adminAgent();
+  const tpl = await seedTemplate(agent);
+
+  const activeDelete = await agent.delete(`/api/salary-templates/${tpl._id}/permanent`);
+  assert.equal(activeDelete.status, 400);
+
+  assert.equal((await agent.delete(`/api/salary-templates/${tpl._id}`)).status, 200);
+
+  const gone = await agent.delete(`/api/salary-templates/${tpl._id}/permanent`);
+  assert.equal(gone.status, 200);
+  assert.equal((await agent.get(`/api/salary-templates/${tpl._id}`)).status, 404);
+});
+
 test('payslip generation creates idempotent slips and employees can list/download their own', async () => {
   const { agent } = await adminAgent();
   const tpl = await seedTemplate(agent);
