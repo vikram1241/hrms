@@ -41,12 +41,16 @@ const toPublicUser = (user) => {
 export const listUsers = asyncHandler(async (req, res) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
-  const { search, role, status, department, includeDeleted, employeesOnly } = req.query;
+  const { search, role, status, department, designation, includeDeleted, employeesOnly } = req.query;
 
   const filter = {};
   if (includeDeleted !== 'true') filter.deletedAt = null;
   if (role) filter.role = role;
   if (department) filter['employeeDetails.department'] = department;
+  // Job title from Setup → Roles (distinct from auth role admin/hr/employee).
+  if (designation && String(designation).trim()) {
+    filter['employeeDetails.designation'] = String(designation).trim();
+  }
   if (status === 'active') filter.isActive = true;
   if (status === 'inactive') filter.isActive = false;
   // Provisioned employees only (offer accepted + credentials issued → employeeId assigned).

@@ -101,7 +101,7 @@ test('payslip generation creates idempotent slips and employees can list/downloa
   const tpl = await seedTemplate(agent);
   const { user: emp, agent: empAgent } = await authAgent(app, {
     email: 'rahul@xyz.com', role: 'employee',
-    employeeDetails: { employeeId: 'EMP100', designation: 'SE', department: 'Engineering' }
+    employeeDetails: { employeeId: 'MMS100', designation: 'SE', department: 'Engineering' }
   });
 
   await agent.post('/api/salary-assignments').send({ userId: emp._id, templateId: tpl._id, annualCTC: 1200000 });

@@ -1,4 +1,3 @@
-export const DEPARTMENTS = ['Engineering', 'HR', 'Sales', 'Marketing', 'Finance', 'Operations', 'Design'];
 export const ROLES = ['admin', 'hr', 'employee'];
 // Document types shown in the upload dropdown (RelievingLetter intentionally omitted).
 export const DOC_TYPES = [

@@ -11,9 +11,9 @@ import { X, Mail, FileText } from 'lucide-react';
 import Button from '../../components/ui/Button.jsx';
 import CurrencyField from '../../components/ui/CurrencyField.jsx';
 import JobRoleSelect from '../../components/feature/JobRoleSelect.jsx';
+import DepartmentSelect from '../../components/feature/DepartmentSelect.jsx';
 import { createOffer, sendOfferEmail, offerPdfUrl } from '../../api/offers.js';
 import { listTemplates } from '../../api/salary.js';
-import { DEPARTMENTS } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const blank = {
@@ -117,9 +117,14 @@ export default function CreateOfferDialog({ open, onClose, onSaved }) {
                 placeholder="e.g. Nizamabad"
                 helperText="Used as reporting area on the appointment letter. Leave blank to omit that line."
               />
-              <TextField label="Department" value={form.department} onChange={set('department')} select fullWidth required>
-                {DEPARTMENTS.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
-              </TextField>
+              <DepartmentSelect
+                label="Department"
+                value={form.department}
+                onChange={(v) => setForm({ ...form, department: v })}
+                required
+                allowEmpty={false}
+                size="medium"
+              />
               <TextField label="Joining Date" type="date" value={form.joiningDate} onChange={set('joiningDate')} fullWidth required InputLabelProps={{ shrink: true }} />
               <TextField label="Offer Date" type="date" value={form.offerDate} onChange={set('offerDate')} fullWidth InputLabelProps={{ shrink: true }} helperText="Defaults to today" />
               <TextField label="Salary Template" value={form.templateId} onChange={set('templateId')} select fullWidth required>

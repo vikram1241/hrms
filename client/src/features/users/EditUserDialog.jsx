@@ -6,8 +6,9 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import FormDialog from '../../components/ui/FormDialog.jsx';
 import JobRoleSelect from '../../components/feature/JobRoleSelect.jsx';
+import DepartmentSelect from '../../components/feature/DepartmentSelect.jsx';
 import { updateUser } from '../../api/users.js';
-import { DEPARTMENTS, ROLES, fullName } from '../../config/constants.js';
+import { ROLES, fullName } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../../features/ui/toastSlice.js';
 
 export default function EditUserDialog({ open, user, onClose, onSaved }) {
@@ -36,7 +37,7 @@ export default function EditUserDialog({ open, user, onClose, onSaved }) {
     setSaving(true);
     try {
       const payload = { ...form };
-      if (!payload.department) delete payload.department; // avoid enum error on empty
+      if (!payload.department) delete payload.department;
       await updateUser(user._id, payload);
       dispatch(notifySuccess('User updated.'));
       onSaved?.();
@@ -58,14 +59,17 @@ export default function EditUserDialog({ open, user, onClose, onSaved }) {
         <TextField label="Last Name" value={form.lastName || ''} onChange={set('lastName')} fullWidth required />
         <TextField label="Phone" value={form.phone || ''} onChange={set('phone')} fullWidth />
         <TextField label="Employee ID" value={form.employeeId || ''} onChange={set('employeeId')} fullWidth />
-        <TextField label="Role" value={form.role || ''} onChange={set('role')} select fullWidth>
+        <TextField label="Access role" value={form.role || ''} onChange={set('role')} select fullWidth helperText="Login permission (admin / hr / employee)">
           {ROLES.map((r) => <MenuItem key={r} value={r} sx={{ textTransform: 'capitalize' }}>{r}</MenuItem>)}
         </TextField>
-        <TextField label="Department" value={form.department || ''} onChange={set('department')} select fullWidth>
-          <MenuItem value="">—</MenuItem>
-          {DEPARTMENTS.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
-        </TextField>
+        <DepartmentSelect
+          label="Department"
+          value={form.department || ''}
+          onChange={(v) => setForm({ ...form, department: v })}
+          size="medium"
+        />
         <JobRoleSelect
+          label="Role"
           value={form.designation || ''}
           onChange={(v) => setForm({ ...form, designation: v })}
           className="sm:col-span-2"

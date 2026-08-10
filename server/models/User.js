@@ -139,7 +139,7 @@ const UserSchema = new mongoose.Schema({
   employeeDetails: {
     employeeId: { type: String, uppercase: true, trim: true },
     designation: { type: String, trim: true },
-    department: { type: String, enum: ['Engineering', 'HR', 'Sales', 'Marketing', 'Finance', 'Operations', 'Design'] },
+    department: { type: String, trim: true },
     dateOfJoining: { type: Date },
     // Epic 8: client requires Permanent/Probation alongside the existing values.
     employmentType: { type: String, enum: ['Full-Time', 'Part-Time', 'Permanent', 'Probation', 'Contract', 'Intern'], default: 'Full-Time' },

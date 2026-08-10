@@ -290,12 +290,12 @@ test('Bulk attendance — mark many employees for a day in one call', async () =
 
 test('Bulk attendance — import from an .xlsx roster (by employeeId/email)', async () => {
   const { admin } = await setup();
-  const { user } = await authAgent(app, { email: 'imp@xyz.com', role: 'employee', employeeDetails: { employeeId: 'EMP90001' } });
+  const { user } = await authAgent(app, { email: 'imp@xyz.com', role: 'employee', employeeDetails: { employeeId: 'MMS90001' } });
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Sheet1');
   ws.addRow(['employeeId', 'email', 'date', 'status', 'checkIn', 'checkOut']);
-  ws.addRow(['EMP90001', '', '2026-07-05', 'Present', '09:30', '18:30']);
+  ws.addRow(['MMS90001', '', '2026-07-05', 'Present', '09:30', '18:30']);
   ws.addRow(['', 'imp@xyz.com', '2026-07-06', 'Half-Day', '', '']);
   ws.addRow(['NOPE999', '', '2026-07-07', 'Present', '', '']); // unknown → failed row
   const buffer = await wb.xlsx.writeBuffer();

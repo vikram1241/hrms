@@ -7,6 +7,7 @@ import { formatINR } from '../utils/money.js';
 import { paisaToWords } from '../utils/numberToWords.js';
 import ApiError from '../utils/ApiError.js';
 import { monthlyCtcFromAnnual } from '../utils/salaryEngine.js';
+import { getOfferTravelAllowanceLine } from '../utils/offerTravelAllowance.js';
 import { downscaleForPdfEmbed } from './brandingOptimize.js';
 
 const ROOT = process.cwd();
@@ -953,13 +954,12 @@ export const generateOfferLetterPdf = async ({
     { text: 'Travel / Conveyance: ', bold: true },
     { text: 'Reimbursement of actual expenses as per Company policy (with supporting bills).', bold: false }
   ], { size: 10, gap: 18 });
-  // Field travel allowance — not applicable to HR / Admin office roles.
-  const offerRoleKey = `${position || ''} ${department || ''}`.toLowerCase();
-  const hideOtherAllowance = /\b(hr|admin|administrator|human\s*resources?)\b/.test(offerRoleKey);
-  if (!hideOtherAllowance) {
+  // Role-based travel/other allowance (BDM / ASM / RBM only — not Admin, HR, IT).
+  const travelAllowance = getOfferTravelAllowanceLine(position, department);
+  if (travelAllowance) {
     writeRich([
-      { text: 'Other allowance: ', bold: true },
-      { text: 'Per Km Rs 3.50, Daily Rs 320, Outstation Rs 520', bold: false }
+      { text: travelAllowance.label, bold: true },
+      { text: travelAllowance.text, bold: false }
     ], { size: 10, gap: 18 });
   }
 

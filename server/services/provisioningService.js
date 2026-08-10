@@ -3,15 +3,44 @@ import User from '../models/User.js';
 import { sendCredentials } from './emailService.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 
+/** Mirus Med Sciences short prefix for employee codes. */
+export const EMPLOYEE_ID_PREFIX = (process.env.EMPLOYEE_ID_PREFIX || 'MMS').toUpperCase();
+
 /**
- * Generate the next available employee id (EMP#####), guaranteed unique.
- * Seeds from the count of existing ids and increments past any collision.
+ * Next numeric suffix: max among existing MMS##### (or configured prefix) + 1.
+ * Falls back to 45872 when none exist yet (preserves historical sequence).
+ */
+const nextEmployeeIdNumber = async () => {
+  const prefix = EMPLOYEE_ID_PREFIX;
+  const re = new RegExp(`^${prefix}(\\d+)$`, 'i');
+  const users = await User.find(
+    { 'employeeDetails.employeeId': { $regex: re } },
+    { 'employeeDetails.employeeId': 1 }
+  ).lean();
+
+  let max = 45871; // so first id is …45872 when none exist
+  for (const u of users) {
+    const m = String(u.employeeDetails?.employeeId || '').match(re);
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max + 1;
+};
+
+/**
+ * Generate the next available employee id (MMS#####), guaranteed unique.
+ * Prefix defaults to MMS (Mirus Med Sciences); override with EMPLOYEE_ID_PREFIX.
  */
 export const generateEmployeeId = async () => {
-  let n = 45872 + await User.countDocuments({ 'employeeDetails.employeeId': { $ne: null } });
-  let id = `EMP${n}`;
+  const prefix = EMPLOYEE_ID_PREFIX;
+  let n = await nextEmployeeIdNumber();
+  let id = `${prefix}${n}`;
   // eslint-disable-next-line no-await-in-loop
-  while (await User.exists({ 'employeeDetails.employeeId': id })) { n += 1; id = `EMP${n}`; }
+  while (await User.exists({ 'employeeDetails.employeeId': id })) {
+    n += 1;
+    id = `${prefix}${n}`;
+  }
   return id;
 };
 

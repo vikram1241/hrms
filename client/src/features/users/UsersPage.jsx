@@ -19,7 +19,9 @@ import TablePager from '../../components/ui/TablePager.jsx';
 import EditUserDialog from './EditUserDialog.jsx';
 import AssignSalaryDialog from './AssignSalaryDialog.jsx';
 import { listUsers, deleteUser, restoreUser, generateCredentials, sendPasswordResetLink } from '../../api/users.js';
-import { DEPARTMENTS, ROLES, fullName } from '../../config/constants.js';
+import JobRoleSelect from '../../components/feature/JobRoleSelect.jsx';
+import DepartmentSelect from '../../components/feature/DepartmentSelect.jsx';
+import { ROLES, fullName } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const RoleChip = ({ value }) => <span className="badge-neutral capitalize">{value}</span>;
@@ -71,7 +73,9 @@ const StatusCell = ({ data }) => {
 export default function UsersPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const [filters, setFilters] = useState({ search: '', role: '', status: '', department: '', includeDeleted: false });
+  const [filters, setFilters] = useState({
+    search: '', role: '', designation: '', status: '', department: '', includeDeleted: false
+  });
   const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -164,7 +168,8 @@ export default function UsersPage() {
     { headerName: 'ID', valueGetter: (p) => p.data.employeeDetails?.employeeId || '—', maxWidth: 130 },
     { headerName: 'Name', valueGetter: (p) => fullName(p.data), cellRenderer: NameCell, minWidth: 240, flex: 2 },
     { headerName: 'Department', valueGetter: (p) => p.data.employeeDetails?.department || '—' },
-    { headerName: 'Role', field: 'role', cellRenderer: RoleChip, maxWidth: 140 },
+    { headerName: 'Role', valueGetter: (p) => p.data.employeeDetails?.designation || '—', maxWidth: 160 },
+    { headerName: 'Access', field: 'role', cellRenderer: RoleChip, maxWidth: 120 },
     { headerName: 'Status', cellRenderer: StatusCell, filter: false, sortable: false, maxWidth: 150 },
     {
       headerName: 'Actions', filter: false, sortable: false, minWidth: 190, maxWidth: 210,
@@ -185,13 +190,19 @@ export default function UsersPage() {
       <PageHeader title="User Management" subtitle={`${resp.pagination.total} users in the directory`} />
 
       <Card className="mb-4 p-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <div className="relative lg:col-span-2">
             <Search size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input className="input pl-10" placeholder="Search by name, ID, email…" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
           </div>
-          <TextField select size="small" label="Role" value={filters.role} onChange={(e) => { setPage(1); setFilters({ ...filters, role: e.target.value }); }}>
-            <MenuItem value="">All roles</MenuItem>
+          <JobRoleSelect
+            label="Role"
+            value={filters.designation}
+            onChange={(v) => { setPage(1); setFilters({ ...filters, designation: v }); }}
+            emptyLabel="All roles"
+          />
+          <TextField select size="small" label="Access" value={filters.role} onChange={(e) => { setPage(1); setFilters({ ...filters, role: e.target.value }); }}>
+            <MenuItem value="">All access</MenuItem>
             {ROLES.map((r) => <MenuItem key={r} value={r} sx={{ textTransform: 'capitalize' }}>{r}</MenuItem>)}
           </TextField>
           <TextField select size="small" label="Status" value={filters.status} onChange={(e) => { setPage(1); setFilters({ ...filters, status: e.target.value }); }}>
@@ -199,10 +210,12 @@ export default function UsersPage() {
             <MenuItem value="active">Active</MenuItem>
             <MenuItem value="inactive">Inactive</MenuItem>
           </TextField>
-          <TextField select size="small" label="Department" value={filters.department} onChange={(e) => { setPage(1); setFilters({ ...filters, department: e.target.value }); }}>
-            <MenuItem value="">All departments</MenuItem>
-            {DEPARTMENTS.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
-          </TextField>
+          <DepartmentSelect
+            label="Department"
+            value={filters.department}
+            onChange={(v) => { setPage(1); setFilters({ ...filters, department: v }); }}
+            emptyLabel="All departments"
+          />
         </div>
         <FormControlLabel
           sx={{ mt: 1 }}

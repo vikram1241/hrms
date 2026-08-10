@@ -14,6 +14,7 @@ import TemplateDialog from './TemplateDialog.jsx';
 import LetterTemplatesSection from './LetterTemplatesSection.jsx';
 import CFTemplatesSection from './CFTemplatesSection.jsx';
 import JobRolesSection from './JobRolesSection.jsx';
+import DepartmentsSection from './DepartmentsSection.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { listTemplates, deactivateTemplate, deleteInactiveTemplate } from '../../api/salary.js';
 import { CALC_TYPES } from '../../config/constants.js';
@@ -70,21 +71,24 @@ export default function TemplatesPage() {
     <div>
       <PageHeader
         title="Setup Templates"
-        subtitle="Salary models, job titles, HR letter templates and C&F agreement templates"
+        subtitle="Salary models, job titles, departments, HR letter templates and C&F agreement templates"
         actions={tab === 0 ? <Button onClick={() => setDialog({ open: true, template: null })}><Plus size={16} /> New Salary Model</Button> : null}
       />
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Salary Structures" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Roles" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Departments" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Letter Templates" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="C&F Templates" sx={{ textTransform: 'none', fontWeight: 600 }} />
       </Tabs>
 
-      {tab === 3 ? (
+      {tab === 4 ? (
         <CFTemplatesSection />
-      ) : tab === 2 ? (
+      ) : tab === 3 ? (
         <LetterTemplatesSection />
+      ) : tab === 2 ? (
+        <DepartmentsSection />
       ) : tab === 1 ? (
         <JobRolesSection />
       ) : loading ? (

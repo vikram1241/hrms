@@ -97,7 +97,7 @@ export default function Login() {
               error={companyError} autoComplete="organization" autoFocus
             />
             <Input
-              id="identifier" type="text" label="Email or Employee ID" placeholder="you@mirus.com or EMP45872" icon={Mail}
+              id="identifier" type="text" label="Email or Employee ID" placeholder="you@mirus.com or MMS45872" icon={Mail}
               value={form.identifier}
               onChange={(e) => setForm({ ...form, identifier: e.target.value })}
               onBlur={() => setTouched((t) => ({ ...t, identifier: true }))}

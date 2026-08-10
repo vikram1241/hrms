@@ -328,6 +328,25 @@ docker-compose exec client nginx -t
 docker stats hrms-server hrms-client hrms-mongodb
 ```
 
+### Employee Code Mirgration
+```
+# Dry-run (default)
+cd server && node scripts/migrate-employee-ids-to-mms.js
+# Apply
+cd server && node scripts/migrate-employee-ids-to-mms.js --apply
+docker-compose exec server node scripts/migrate-employee-ids-to-mms.js --apply
+
+or 
+cd server
+
+# Preview only
+npm run db:migrate:emp-ids-mms
+# or: node scripts/migrate-employee-ids-to-mms.js
+
+# Apply
+node scripts/migrate-employee-ids-to-mms.js --apply
+```
+
 ## Next Steps
 
 1. Review and customize the Dockerfiles for your needs

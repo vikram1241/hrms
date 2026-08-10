@@ -18,13 +18,13 @@ test('self-service hub returns a curated overview with reporting manager', async
   const { agent } = await authAgent(app, {
     email: 'rahul@xyz.com', role: 'employee',
     personalDetails: { firstName: 'Rahul', lastName: 'Kumar' },
-    employeeDetails: { employeeId: 'EMP45872', designation: 'Senior Software Engineer', department: 'Engineering', reportingManagerId: manager._id }
+    employeeDetails: { employeeId: 'MMS45872', designation: 'Senior Software Engineer', department: 'Engineering', reportingManagerId: manager._id }
   });
 
   const res = await agent.get('/api/self-service/overview');
   assert.equal(res.status, 200);
   assert.equal(res.body.profile.fullName, 'Rahul Kumar');
-  assert.equal(res.body.profile.employeeId, 'EMP45872');
+  assert.equal(res.body.profile.employeeId, 'MMS45872');
   assert.equal(res.body.profile.status, 'Active Employee');
   assert.equal(res.body.profile.reportingManager, 'Priya Sharma');
   assert.equal(res.body.latestPayslip, null);

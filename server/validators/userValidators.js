@@ -1,7 +1,5 @@
 import { body } from 'express-validator';
 
-const DEPARTMENTS = ['Engineering', 'HR', 'Sales', 'Marketing', 'Finance', 'Operations', 'Design'];
-
 export const updateUserRules = [
   body('firstName').optional().isString().trim().notEmpty().withMessage('First name cannot be empty'),
   body('lastName').optional().isString().trim().notEmpty().withMessage('Last name cannot be empty'),
@@ -9,7 +7,7 @@ export const updateUserRules = [
   body('role').optional().isIn(['admin', 'hr', 'employee']).withMessage('Invalid role'),
   body('isActive').optional().isBoolean().withMessage('isActive must be boolean').toBoolean(),
   body('designation').optional().isString().trim(),
-  body('department').optional().isIn(DEPARTMENTS).withMessage('Invalid department'),
+  body('department').optional().isString().trim(),
   body('employeeId').optional().isString().trim().notEmpty().withMessage('Employee ID cannot be empty'),
   // Epic 8 employment + statutory fields.
   body('employmentType').optional().isIn(['Full-Time', 'Part-Time', 'Permanent', 'Probation', 'Contract', 'Intern']).withMessage('Invalid employment type'),

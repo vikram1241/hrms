@@ -1,16 +1,17 @@
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import useAsync from '../../hooks/useAsync.js';
-import { listJobRoles } from '../../api/jobRoles.js';
+import { listDepartments } from '../../api/departments.js';
 
 /**
- * Designation / job-title select from Setup → Roles catalog.
- * Stores the role name string (matches User.employeeDetails.designation).
+ * Department select from Setup → Departments catalog.
+ * Stores the department name string (matches User/Offer.department).
+ * Refetches when the menu opens so newly added departments appear.
  */
-export default function JobRoleSelect({
+export default function DepartmentSelect({
   value = '',
   onChange,
-  label = 'Designation',
+  label = 'Department',
   required = false,
   size = 'small',
   fullWidth = true,
@@ -18,7 +19,7 @@ export default function JobRoleSelect({
   emptyLabel = '—',
   className
 }) {
-  const { data: roles, loading, reload } = useAsync(() => listJobRoles(), []);
+  const { data: departments, loading, reload } = useAsync(() => listDepartments(), []);
 
   return (
     <TextField
@@ -34,10 +35,10 @@ export default function JobRoleSelect({
       SelectProps={{ onOpen: () => { reload(); } }}
     >
       {allowEmpty && <MenuItem value="">{emptyLabel}</MenuItem>}
-      {(roles || []).map((r) => (
-        <MenuItem key={r._id} value={r.name}>{r.name}</MenuItem>
+      {(departments || []).map((d) => (
+        <MenuItem key={d._id} value={d.name}>{d.name}</MenuItem>
       ))}
-      {value && !(roles || []).some((r) => r.name === value) && (
+      {value && !(departments || []).some((d) => d.name === value) && (
         <MenuItem value={value}>{value}</MenuItem>
       )}
     </TextField>

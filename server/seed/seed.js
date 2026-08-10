@@ -216,15 +216,15 @@ async function seedCompany(company) {
     email: 'priya.hr@mirus.com', password: DEMO_PASSWORD, role: 'hr', isActive: true, onboardingStage: 'completed',
     personalDetails: { firstName: 'Priya', lastName: 'Sharma', dateOfBirth: new Date('1990-06-15'), gender: 'Female' },
     contactInfo: baseContact(),
-    employeeDetails: { employeeId: 'EMP45871', designation: 'HR Manager', department: 'HR', dateOfJoining: new Date('2021-04-01') }
+    employeeDetails: { employeeId: 'MMS45871', designation: 'HR Manager', department: 'HR', dateOfJoining: new Date('2021-04-01') }
   });
 
   // --- Employees ---
   const employeesSpec = [
-    { email: 'rahul.kumar@mirus.com', first: 'Rahul', last: 'Kumar', empId: 'EMP45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true },
-    { email: 'amit.patel@mirus.com', first: 'Amit', last: 'Patel', empId: 'EMP45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation' },
-    { email: 'neha.gupta@mirus.com', first: 'Neha', last: 'Gupta', empId: 'EMP45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent' },
-    { email: 'sunny.deol@mirus.com', first: 'Sunny', last: 'Deol', empId: 'EMP45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true }
+    { email: 'rahul.kumar@mirus.com', first: 'Rahul', last: 'Kumar', empId: 'MMS45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true },
+    { email: 'amit.patel@mirus.com', first: 'Amit', last: 'Patel', empId: 'MMS45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation' },
+    { email: 'neha.gupta@mirus.com', first: 'Neha', last: 'Gupta', empId: 'MMS45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent' },
+    { email: 'sunny.deol@mirus.com', first: 'Sunny', last: 'Deol', empId: 'MMS45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true }
   ];
 
   const employees = [];
