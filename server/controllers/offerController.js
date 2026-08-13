@@ -17,6 +17,7 @@ import { provisionEmployee } from '../services/provisioningService.js';
 import { sendOfferInvite } from '../services/emailService.js';
 import { queueMailJob } from '../services/mailQueue.js';
 import { issueAndEmailAppointmentLetter } from '../services/appointmentLetterService.js';
+import { acceptOfferForProvisioning } from '../services/offerService.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 import Company from '../models/Company.js';
 import { resolveDefaultLetterTemplate } from './letterTemplateController.js';
@@ -118,7 +119,13 @@ const createOfferCore = async (payload, { sendEmail = true } = {}) => {
   if (!Number.isFinite(annualCTC) || annualCTC <= 0) throw new ApiError(400, 'annualCTC must be a positive number');
 
   const template = await resolveTemplate(payload);
-  const user = await upsertCandidateUser({ email: candidateEmail, fullName });
+  const offerDt = offerDate || new Date();
+  const user = await upsertCandidateUser({
+    email: candidateEmail,
+    fullName,
+    joiningDate,
+    offerDate: offerDt
+  });
 
   // Persist offer phone onto the candidate when profile still has the placeholder.
   const offerPhone = String(payload.phone || '').trim();
@@ -141,11 +148,8 @@ const createOfferCore = async (payload, { sendEmail = true } = {}) => {
 
   const company = await Company.findById(user.companyId);
   const letterTpl = await resolveDefaultLetterTemplate('OfferLetter');
-  const offerDt = offerDate || new Date();
 
-  // Always generate the Mirus-style offer PDF so the salary table comes from the
-  // salary structure template selected at create time (frozen breakdown).
-  // Letter template bodyParagraphs optionally override the common letter body.
+  // Always generate the Mirus-style offer PDF
   const { pdfFileUrl, acceptancePlacement } = await generateOfferLetterPdf({
     fullName,
     position,
@@ -473,15 +477,7 @@ export const approveOffer = asyncHandler(async (req, res) => {
   if (offer.status === 'declined') throw new ApiError(400, 'Cannot approve a declined offer');
   if (offer.status !== 'signed') throw new ApiError(400, 'Offer has not been signed by the candidate yet');
 
-  const now = new Date();
-  offer.status = 'accepted';
-  offer.acceptedAt = now;
-  offer.approvedAt = now;
-  offer.approvedBy = req.user._id;
-  // Consume the magic link now that the offer is fully approved.
-  offer.accessTokenHash = null;
-  offer.accessTokenExpires = null;
-  await offer.save();
+  await acceptOfferForProvisioning(offer, { approvedBy: req.user._id });
 
   // Provision the candidate into an active employee and email credentials.
   let provisioning = null;

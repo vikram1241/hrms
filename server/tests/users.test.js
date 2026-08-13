@@ -91,3 +91,22 @@ test('invalid object id -> 400', async () => {
   const res = await agent.get('/api/users/not-an-id');
   assert.equal(res.status, 400);
 });
+
+test('permanent delete removes a soft-deleted user without payslips', async () => {
+  const { agent } = await adminAgent();
+  const target = await createUser({ email: 'purge@xyz.com' });
+
+  await agent.delete(`/api/users/${target._id}`);
+  const del = await agent.delete(`/api/users/${target._id}/permanent`);
+  assert.equal(del.status, 200);
+
+  const withDeleted = await agent.get('/api/users').query({ search: 'purge@xyz.com', includeDeleted: 'true' });
+  assert.equal(withDeleted.body.data.length, 0);
+});
+
+test('cannot permanently delete a user who is not soft-deleted', async () => {
+  const { agent } = await adminAgent();
+  const target = await createUser({ email: 'live@xyz.com' });
+  const res = await agent.delete(`/api/users/${target._id}/permanent`);
+  assert.equal(res.status, 400);
+});

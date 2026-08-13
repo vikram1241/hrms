@@ -94,3 +94,24 @@ test('HR approval provisions the employee and emails login credentials', async (
   const again = await agent.post(`/api/offers/${offerId}/approve`);
   assert.equal(again.status, 400);
 });
+
+test('re-offer to a soft-deleted email restores the account and allows login after approval', async () => {
+  const { agent, token, offerId } = await stageOffer();
+
+  const user = await (await import('../models/User.js')).default.findOne({ email: 'cand@example.com' });
+  user.deletedAt = new Date();
+  user.isActive = false;
+  await user.save();
+
+  await request(app).post(`/api/candidate/offer/${token}/sign`).send({ signatureBase64: SIGNATURE });
+  const approve = await agent.post(`/api/offers/${offerId}/approve`);
+  assert.equal(approve.status, 200);
+
+  const refreshed = await (await import('../models/User.js')).default.findOne({ email: 'cand@example.com' });
+  assert.equal(refreshed.deletedAt, null);
+  assert.equal(refreshed.isActive, true);
+
+  const login = await request(app).post('/api/auth/login')
+    .send({ companySlug: DEFAULT_COMPANY_SLUG, email: 'cand@example.com', password: approve.body.tempPassword });
+  assert.equal(login.status, 200);
+});

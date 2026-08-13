@@ -66,6 +66,7 @@ export const provisionEmployee = async (user, { offer } = {}) => {
     user.employeeDetails.dateOfJoining = offer.joiningDate;
   }
 
+  user.deletedAt = null;
   user.isActive = true;
   const tempPassword = generateTempPassword();
   user.password = tempPassword; // hashed by the pre-save hook

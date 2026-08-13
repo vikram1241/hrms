@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import User from '../models/User.js';
+import { refreshOpenOfferDates } from './offerService.js';
 
 const splitName = (fullName) => {
   const parts = String(fullName).trim().split(/\s+/);
@@ -9,16 +10,52 @@ const splitName = (fullName) => {
 };
 
 /**
- * Find or lazily create the User record that backs a candidate (lifecycle
- * "Draft" state). Schema-required fields we don't yet know are seeded with
- * clearly-marked placeholders; the candidate overwrites them during onboarding
- * (Epic 6) after setting their password (US 5.4). The account is inactive and
- * has an unguessable random password so it cannot be logged into until setup.
+ * Reset a soft-deleted user back to draft candidate state for a new offer cycle.
+ * Clears deletedAt, deactivates login, and drops prior employee id for re-provisioning.
  */
-export const upsertCandidateUser = async ({ email, fullName }) => {
+export const restoreSoftDeletedCandidate = async (user, { fullName, joiningDate, offerDate } = {}) => {
+  const { firstName, lastName } = splitName(fullName || `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`);
+
+  user.deletedAt = null;
+  user.isActive = false;
+  user.onboardingStage = 'personal';
+  user.password = crypto.randomBytes(24).toString('hex');
+  user.passwordSetup = { tokenHash: null, expiresAt: null };
+  user.personalDetails.firstName = firstName;
+  user.personalDetails.lastName = lastName;
+
+  if (!user.employeeDetails) user.employeeDetails = {};
+  user.set('employeeDetails.employeeId', undefined);
+  user.set('employeeDetails.designation', undefined);
+  user.set('employeeDetails.department', undefined);
+  if (joiningDate) user.employeeDetails.dateOfJoining = new Date(joiningDate);
+
+  await user.save();
+  await refreshOpenOfferDates(user.email, { joiningDate, offerDate, fullName });
+
+  return user;
+};
+
+/**
+ * Find or lazily create the User record that backs a candidate (lifecycle
+ * "Draft" state). Reuses soft-deleted accounts (restores instead of forking).
+ */
+export const upsertCandidateUser = async ({ email, fullName, joiningDate, offerDate } = {}) => {
   const normalized = String(email).toLowerCase().trim();
   const existing = await User.findOne({ email: normalized });
-  if (existing) return existing;
+  if (existing) {
+    if (existing.deletedAt) {
+      return restoreSoftDeletedCandidate(existing, { fullName, joiningDate, offerDate });
+    }
+    const { firstName, lastName } = splitName(fullName);
+    if (fullName) {
+      existing.personalDetails.firstName = firstName;
+      existing.personalDetails.lastName = lastName;
+      await existing.save();
+    }
+    await refreshOpenOfferDates(normalized, { joiningDate, offerDate, fullName });
+    return existing;
+  }
 
   const { firstName, lastName } = splitName(fullName);
   const placeholderAddress = { street: 'Pending', city: 'Pending', state: 'Pending', country: 'India', zipCode: '000000' };
@@ -37,6 +74,7 @@ export const upsertCandidateUser = async ({ email, fullName }) => {
       emergencyContactPhone: '0000000000',
       presentAddress: { ...placeholderAddress },
       permanentAddress: { ...placeholderAddress }
-    }
+    },
+    ...(joiningDate ? { employeeDetails: { dateOfJoining: new Date(joiningDate) } } : {})
   });
 };

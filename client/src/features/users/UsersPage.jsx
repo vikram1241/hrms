@@ -18,7 +18,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import TablePager from '../../components/ui/TablePager.jsx';
 import EditUserDialog from './EditUserDialog.jsx';
 import AssignSalaryDialog from './AssignSalaryDialog.jsx';
-import { listUsers, deleteUser, restoreUser, generateCredentials, sendPasswordResetLink } from '../../api/users.js';
+import { listUsers, deleteUser, permanentDeleteUser, restoreUser, generateCredentials, sendPasswordResetLink } from '../../api/users.js';
 import JobRoleSelect from '../../components/feature/JobRoleSelect.jsx';
 import DepartmentSelect from '../../components/feature/DepartmentSelect.jsx';
 import { ROLES, fullName } from '../../config/constants.js';
@@ -28,12 +28,13 @@ const RoleChip = ({ value }) => <span className="badge-neutral capitalize">{valu
 
 // Per-row action cluster: direct icons for common actions + an overflow menu
 // for account/credential actions. Manages its own menu anchor state.
-function RowActions({ row, onView, onEdit, onAssign, onDelete, onCreds, onReset, onRestore }) {
+function RowActions({ row, onView, onEdit, onAssign, onDelete, onCreds, onReset, onRestore, onPermanentDelete }) {
   const [anchor, setAnchor] = useState(null);
   if (row.deletedAt) {
     return (
-      <div className="flex h-full items-center">
+      <div className="flex h-full items-center gap-1">
         <Tooltip title="Restore"><button className="btn-ghost p-2" onClick={() => onRestore(row)}><RotateCcw size={16} /></button></Tooltip>
+        <Tooltip title="Delete permanently"><button className="btn-ghost p-2 text-danger" onClick={() => onPermanentDelete(row)}><Trash2 size={16} /></button></Tooltip>
       </div>
     );
   }
@@ -85,7 +86,9 @@ export default function UsersPage() {
   const [editUser, setEditUser] = useState(null);
   const [assignUser, setAssignUser] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [permanentDeleting, setPermanentDeleting] = useState(false);
   const [credsTarget, setCredsTarget] = useState(null);
   const [credsBusy, setCredsBusy] = useState(false);
   const [resetTarget, setResetTarget] = useState(null);
@@ -123,6 +126,20 @@ export default function UsersPage() {
       dispatch(notifyError(err.uiMessage));
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const confirmPermanentDelete = async () => {
+    setPermanentDeleting(true);
+    try {
+      await permanentDeleteUser(permanentDeleteTarget._id);
+      dispatch(notifySuccess('User permanently deleted.'));
+      setPermanentDeleteTarget(null);
+      fetchUsers();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage));
+    } finally {
+      setPermanentDeleting(false);
     }
   };
 
@@ -179,6 +196,7 @@ export default function UsersPage() {
           onView={(row) => navigate(`/users/${row._id}`)}
           onEdit={setEditUser} onAssign={setAssignUser} onDelete={setDeleteTarget}
           onCreds={setCredsTarget} onReset={setResetTarget} onRestore={onRestore}
+          onPermanentDelete={setPermanentDeleteTarget}
         />
       )
     }
@@ -242,6 +260,11 @@ export default function UsersPage() {
         open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} loading={deleting}
         title="Delete user?" confirmLabel="Delete"
         message={deleteTarget ? `${fullName(deleteTarget)} will be soft-deleted and hidden from the directory. You can restore them later.` : ''}
+      />
+      <ConfirmDialog
+        open={Boolean(permanentDeleteTarget)} onClose={() => setPermanentDeleteTarget(null)} onConfirm={confirmPermanentDelete} loading={permanentDeleting}
+        title="Permanently delete user?" confirmLabel="Delete forever"
+        message={permanentDeleteTarget ? `${fullName(permanentDeleteTarget)} and their staging offers will be removed permanently. This cannot be undone. Blocked if payslips or an accepted offer exist.` : ''}
       />
       <ConfirmDialog
         open={Boolean(credsTarget)} onClose={() => setCredsTarget(null)} onConfirm={confirmGenerateCreds} loading={credsBusy}

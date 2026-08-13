@@ -16,6 +16,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { provisionEmployee } from '../services/provisioningService.js';
 import { generateToken } from '../utils/tokens.js';
 import { sendPasswordSetup } from '../services/emailService.js';
+import { acceptOfferForProvisioning, findLatestProvisionableOffer } from '../services/offerService.js';
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 import { logActivity } from '../services/activityService.js';
@@ -215,6 +216,67 @@ export const softDeleteUser = asyncHandler(async (req, res) => {
 });
 
 /**
+ * DELETE /api/users/:id/permanent
+ * Hard-delete a soft-deleted user and related staging data. Blocked when payslips
+ * or an accepted offer exist (retain audit/finance trail).
+ */
+export const permanentDeleteUser = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid user id');
+
+  if (req.user._id.equals(req.params.id)) {
+    throw new ApiError(400, 'You cannot delete your own account');
+  }
+
+  const user = await User.findById(req.params.id);
+  if (!user) throw new ApiError(404, 'User not found');
+  if (!user.deletedAt) {
+    throw new ApiError(400, 'Only soft-deleted users can be permanently deleted. Soft-delete the user first.');
+  }
+
+  const [payslipCount, acceptedOffer] = await Promise.all([
+    SalarySlip.countDocuments({ employeeId: user._id }),
+    OfferLetter.findOne({ candidateEmail: user.email, status: 'accepted' })
+  ]);
+  if (payslipCount > 0) {
+    throw new ApiError(400, 'Cannot permanently delete — user has payslip records.');
+  }
+  if (acceptedOffer) {
+    throw new ApiError(400, 'Cannot permanently delete — user has an accepted offer. Restore the account instead.');
+  }
+
+  const userId = user._id;
+  const email = user.email;
+
+  await Promise.all([
+    EmployeeSalaryAssignment.deleteMany({ userId }),
+    OfferLetter.deleteMany({ candidateEmail: email }),
+    SalarySlip.deleteMany({ employeeId: userId }),
+    Attendance.deleteMany({ userId }),
+    LeaveRequest.deleteMany({ userId }),
+    PerformanceReview.deleteMany({ userId }),
+    Incentive.deleteMany({ userId }),
+    Appraisal.deleteMany({ userId }),
+    TrainingRecord.deleteMany({ userId }),
+    EmployeeDocument.deleteMany({ userId }),
+    EmployeeDocumentRecord.deleteMany({ userId }),
+    ExitRecord.deleteMany({ userId }),
+    Asset.updateMany({ assignedTo: userId }, { $set: { assignedTo: null, status: 'Available' } })
+  ]);
+
+  await user.deleteOne();
+
+  await logActivity({
+    actor: req.user,
+    action: 'user.delete.permanent',
+    entityType: 'User',
+    entityId: userId,
+    message: `User ${displayName(user)} permanently deleted`
+  });
+
+  res.status(200).json({ success: true, message: 'User permanently deleted' });
+});
+
+/**
  * POST /api/users/:id/credentials
  * Admin/HR-triggered provisioning: ensure an employee ID + active status and
  * (re)generate a temporary password, emailing the credentials to the user.
@@ -225,7 +287,12 @@ export const generateCredentials = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user || user.deletedAt) throw new ApiError(404, 'User not found');
 
-  const offer = await OfferLetter.findOne({ candidateEmail: user.email }).sort({ createdAt: -1 });
+  const offer = await findLatestProvisionableOffer(user.email)
+    || await OfferLetter.findOne({ candidateEmail: user.email }).sort({ createdAt: -1 });
+  if (offer && offer.status !== 'accepted' && offer.status !== 'declined') {
+    await acceptOfferForProvisioning(offer, { approvedBy: req.user._id });
+  }
+
   const result = await provisionEmployee(user, { offer: offer || undefined });
 
   res.status(200).json({

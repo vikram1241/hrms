@@ -6,6 +6,7 @@ import {
   updateUser,
   softDeleteUser,
   restoreUser,
+  permanentDeleteUser,
   generateCredentials,
   sendPasswordResetLink
 } from '../controllers/userController.js';
@@ -25,6 +26,7 @@ router.get('/:id/overview', requirePermission(PERMISSIONS.USER_READ), getEmploye
 router.get('/:id', requirePermission(PERMISSIONS.USER_READ), getUserById);
 router.put('/:id', requirePermission(PERMISSIONS.USER_UPDATE), updateUserRules, validate, updateUser);
 router.delete('/:id', requirePermission(PERMISSIONS.USER_DELETE), softDeleteUser);
+router.delete('/:id/permanent', requirePermission(PERMISSIONS.USER_DELETE), permanentDeleteUser);
 router.post('/:id/restore', requirePermission(PERMISSIONS.USER_RESTORE), restoreUser);
 router.post('/:id/credentials', requirePermission(PERMISSIONS.USER_CREDENTIALS), generateCredentials);
 router.post('/:id/reset-link', requirePermission(PERMISSIONS.USER_CREDENTIALS), sendPasswordResetLink);

@@ -14,9 +14,14 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
   const month = now.getMonth() + 1;
   const year = now.getFullYear();
 
-  // Headcount = employees who accepted an offer (not staged candidates with sent/signed offers).
-  const [acceptedEmails, pendingOffers, slipsThisMonth, offerStatusAgg, pendingDocsAgg] = await Promise.all([
-    OfferLetter.distinct('candidateEmail', { status: 'accepted' }),
+  // Headcount = provisioned active employees (employee id assigned, not soft-deleted).
+  const [totalEmployees, pendingOffers, slipsThisMonth, offerStatusAgg, pendingDocsAgg] = await Promise.all([
+    User.countDocuments({
+      role: 'employee',
+      deletedAt: null,
+      isActive: true,
+      'employeeDetails.employeeId': { $exists: true, $nin: [null, ''] }
+    }),
     OfferLetter.countDocuments({ status: { $in: ['sent', 'pending'] } }),
     SalarySlip.countDocuments({ month, year }),
     OfferLetter.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]),
@@ -26,14 +31,6 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
       { $count: 'n' }
     ])
   ]);
-
-  const totalEmployees = acceptedEmails.length
-    ? await User.countDocuments({
-      role: 'employee',
-      deletedAt: null,
-      email: { $in: acceptedEmails }
-    })
-    : 0;
 
   const byStatus = Object.fromEntries(offerStatusAgg.map((s) => [s._id, s.n]));
   const accepted = byStatus.accepted || 0;
