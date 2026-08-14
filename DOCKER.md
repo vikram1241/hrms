@@ -347,6 +347,22 @@ npm run db:migrate:emp-ids-mms
 node scripts/migrate-employee-ids-to-mms.js --apply
 ```
 
+### Delete user payslips (safe dry-run / execute)
+```
+# Dry-run (default) - shows affected user and payslips (no deletion)
+cd server && node scripts/delete-user-payslips.js --email=alice@example.com
+# or by employee id
+cd server && node scripts/delete-user-payslips.js --employeeId=EMP123
+
+# Execute deletion (will run inside a MongoDB transaction)
+cd server && node scripts/delete-user-payslips.js --email=alice@example.com --execute
+
+# Run from the running server container (dry-run or execute)
+docker-compose exec server node scripts/delete-user-payslips.js --email=alice@example.com
+docker-compose exec server node scripts/delete-user-payslips.js --email=alice@example.com --execute
+
+``` 
+
 ## Next Steps
 
 1. Review and customize the Dockerfiles for your needs
