@@ -27,14 +27,14 @@ const ROLE_LINES = [
     test: (s) => /\basm\b/.test(s)
       || /area\s*sales\s*manager/.test(s)
       || /area\s*development\s*manager/.test(s),
-    text: 'Daily - Rs 425, Outstation - Rs 600, Stay - Rs 1400 + GST'
+    text: 'Daily - Rs 425, Outstation - Rs 600, Stay - Rs 1400 + GST, Per Km - Rs 3.50'
   },
   {
     key: 'RBM',
     test: (s) => /\brbm\b/.test(s)
       || /regional\s*business\s*manager/.test(s)
       || /regional\s*development\s*manager/.test(s),
-    text: 'Headquarters - Rs 500, Outstation - Rs 700, Stay - Rs 1600 + GST'
+    text: 'Headquarters - Rs 500, Outstation - Rs 700, Stay - Rs 1600 + GST, Per Km - Rs 3.50'
   }
 ];
 
