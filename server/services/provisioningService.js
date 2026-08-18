@@ -7,18 +7,19 @@ import { clientOrigin } from '../utils/clientOrigin.js';
 export const EMPLOYEE_ID_PREFIX = (process.env.EMPLOYEE_ID_PREFIX || 'MMS').toUpperCase();
 
 /**
- * Next numeric suffix: max among existing MMS##### (or configured prefix) + 1.
- * Falls back to 45872 when none exist yet (preserves historical sequence).
+ * Next numeric suffix: max among existing MMS#### (or configured prefix) + 1.
+ * Falls back to 21 when none exist yet (preserves historical sequence).
  */
 const nextEmployeeIdNumber = async () => {
   const prefix = EMPLOYEE_ID_PREFIX;
-  const re = new RegExp(`^${prefix}(\\d+)$`, 'i');
+  //RJ Edited//const re = new RegExp(`^${prefix}(\\d+)$`, 'i');
+  const re = new RegExp(`^${prefix}(\\d{4})$`, 'i');
   const users = await User.find(
     { 'employeeDetails.employeeId': { $regex: re } },
     { 'employeeDetails.employeeId': 1 }
   ).lean();
 
-  let max = 45871; // so first id is …45872 when none exist
+  let max = 21; // so first id is …0022 when none exist
   for (const u of users) {
     const m = String(u.employeeDetails?.employeeId || '').match(re);
     if (!m) continue;
@@ -29,20 +30,26 @@ const nextEmployeeIdNumber = async () => {
 };
 
 /**
- * Generate the next available employee id (MMS#####), guaranteed unique.
+ * Generate the next available employee id (MMS####), guaranteed unique.
  * Prefix defaults to MMS (Mirus Med Sciences); override with EMPLOYEE_ID_PREFIX.
  */
 export const generateEmployeeId = async () => {
   const prefix = EMPLOYEE_ID_PREFIX;
   let n = await nextEmployeeIdNumber();
-  let id = `${prefix}${n}`;
+  let id = `${prefix}${String(n).padStart(4, '0')}`;
+  //RJ edited// let id = `${prefix}${n}`;
   // eslint-disable-next-line no-await-in-loop
   while (await User.exists({ 'employeeDetails.employeeId': id })) {
     n += 1;
-    id = `${prefix}${n}`;
+    id = `${prefix}${String(n).padStart(4, '0')}`;
+    //RJ edited// id = `${prefix}${n}`;
   }
   return id;
 };
+
+
+
+
 
 /** A readable temporary password that satisfies the password policy (letter + digit, ≥8). */
 export const generateTempPassword = () => `Hrms@${crypto.randomBytes(4).toString('hex')}`;
