@@ -24,7 +24,10 @@ const nextEmployeeIdNumber = async () => {
     const m = String(u.employeeDetails?.employeeId || '').match(re);
     if (!m) continue;
     const n = parseInt(m[1], 10);
-    if (Number.isFinite(n) && n > max) max = n;
+    if (n <= 9999 && n > max) {
+      max = n;
+    }
+    //if (Number.isFinite(n) && n > max) max = n;
   }
   return max + 1;
 };
