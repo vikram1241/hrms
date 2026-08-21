@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as db from './helpers/testDb.js';
 import app from '../app.js';
 import { authAgent } from './helpers/factories.js';
+import { getOutbox, clearOutbox } from '../services/emailService.js';
 import ExcelJS from 'exceljs';
 import { computeStatutoryDeductions, computePF } from '../utils/statutoryEngine.js';
 
@@ -208,6 +209,31 @@ test('Letter templates — set up offer/appointment/service/FNF templates with P
 
   // Employees cannot manage letter templates.
   assert.equal((await emp.get('/api/letter-templates')).status, 403);
+});
+
+test('Epic 14b — generate FNF letter and email', async () => {
+  const { admin, employee } = await setup();
+  await clearOutbox();
+  // Ensure a default FNFLetter template exists for this company
+  const created = await admin.post('/api/letter-templates').send({
+    type: 'FNFLetter', name: 'Standard FNF For Test', title: 'Full & Final Settlement',
+    bodyParagraphs: ['Dear {{employeeName}}, your full and final settlement is enclosed.'],
+    isDefault: true
+  });
+  assert.equal(created.status, 201);
+
+  const exit = await admin.post('/api/exits').send({ userId: employee._id, resignationDate: '2026-08-01', lastWorkingDay: '2026-08-15', reason: 'Resignation' });
+  assert.equal(exit.status, 201);
+  const letters = await admin.post(`/api/exits/${exit.body.record._id}/letters`);
+  assert.equal(letters.status, 200);
+  assert.ok(letters.body.relievingLetterUrl && letters.body.experienceLetterUrl);
+
+  const rec = await admin.get(`/api/exits/${exit.body.record._id}`);
+  assert.equal(rec.status, 200);
+  assert.ok(rec.body.record.fnfLetterUrl, 'fnfLetterUrl persisted on ExitRecord');
+
+  const out = getOutbox();
+  assert.ok(out.some((o) => String(o.to).includes(employee.email) || /Full & Final|Full and Final/i.test(o.subject || o.body)), 'outbox contains FNF email');
 });
 
 test('C&F templates — create agent/distributor/wholesaler with PDF upload', async () => {

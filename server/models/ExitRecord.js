@@ -29,6 +29,7 @@ const ExitRecordSchema = new mongoose.Schema({
     settledAt: { type: Date, default: null },
     notes: { type: String, trim: true }
   },
+  fnfLetterUrl: { type: String, default: null },
   relievingLetterUrl: { type: String, default: null },
   experienceLetterUrl: { type: String, default: null }
 }, { timestamps: true });

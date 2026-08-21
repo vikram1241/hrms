@@ -5,6 +5,7 @@ import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { generateCompanyDocPdf } from '../services/pdfService.js';
+import fnfService from '../services/fnfService.js';
 import { logActivity } from '../services/activityService.js';
 
 const fullName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
@@ -99,6 +100,13 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
       `During the tenure, their conduct and performance were found to be satisfactory.`
     ]
   });
+  try {
+    const fnfPdf = await fnfService.generateAndEmailFNF({ record, user, company, actor: req.user });
+    if (fnfPdf) record.fnfLetterUrl = fnfPdf;
+  } catch (err) {
+    await logActivity({ actor: req.user, action: 'exit.fnf_failed', entityType: 'ExitRecord', entityId: record._id, message: `FNF generation/email failed for ${name}: ${err.message}` });
+  }
+
   await record.save();
   await logActivity({
     actor: req.user,
@@ -124,7 +132,7 @@ export const deleteExit = asyncHandler(async (req, res) => {
   if (record.status === 'Completed') {
     throw new ApiError(400, 'Completed exits cannot be deleted');
   }
-  if (record.relievingLetterUrl || record.experienceLetterUrl) {
+  if (record.relievingLetterUrl || record.experienceLetterUrl || record.fnfLetterUrl) {
     throw new ApiError(400, 'Exit with generated letters cannot be deleted');
   }
   if (record.status !== 'Initiated') {
