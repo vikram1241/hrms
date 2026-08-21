@@ -3,6 +3,7 @@ import { resolveDefaultLetterTemplate } from '../controllers/letterTemplateContr
 import { generateLetterFromTemplate } from './pdfService.js';
 import { DEFAULT_LETTER_EMAIL } from '../models/LetterTemplate.js';
 import { applyLetterText } from '../config/letterFields.js';
+import { formatINR } from '../utils/money.js';
 import { sendAppointmentLetter } from './emailService.js';
 import { queueMailJob } from './mailQueue.js';
 
@@ -16,10 +17,16 @@ export const generateAndEmailFNF = async ({ record, user, company, actor } = {})
 
   const name = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim();
   const lwd = new Date(record.lastWorkingDay).toDateString();
+  const amountPaisa = Number(record?.fnfSettlement?.amount ?? 0) || 0;
   const fields = {
     employeeName: name,
+    employeeId: user.employeeDetails?.employeeId || '',
     designation: user.employeeDetails?.designation || 'Employee',
     companyName: company?.name || 'Company',
+    amount: formatINR(amountPaisa),
+    Amount: formatINR(amountPaisa),
+    reason: record?.reason || 'Resignation',
+    Reason: record?.reason || 'Resignation',
     lastWorkingDay: lwd,
     date: record.lastWorkingDay
   };

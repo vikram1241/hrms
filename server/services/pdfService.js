@@ -1677,8 +1677,7 @@ export const generateLetterFromTemplate = async ({
     return relPath(dest);
   }
 
-  // Type-specific fillable PDF only. Company letter outline is page chrome
-  // (applied by generateCompanyDocPdf), not an AcroForm source.
+  // Additional PDF-based template fill path for FNF / service templates.
   const sourceFile = template?.fileUrl || null;
 
   if (sourceFile && (await pdfHasAcroForms(sourceFile))) {
@@ -1686,6 +1685,21 @@ export const generateLetterFromTemplate = async ({
     const sealed = await applyCompanySeal(filled, company, { destDir });
     try { await fsp.unlink(path.resolve(ROOT, filled)); } catch { /* ignore */ }
     return sealed;
+  }
+
+  if (sourceFile) {
+    try {
+      const filledInPlace = await fillTextPlaceholderPdf(sourceFile, merged, { destDir });
+      if (filledInPlace) {
+        const sealed = await applyCompanySeal(filledInPlace, company, { destDir });
+        if (sealed !== filledInPlace) {
+          try { await fsp.unlink(path.resolve(ROOT, filledInPlace)); } catch { /* ignore */ }
+        }
+        return sealed;
+      }
+    } catch {
+      /* fall through to body / default copy */
+    }
   }
 
   // Text fallback: substitute placeholders in body paragraphs, or minimal default copy.

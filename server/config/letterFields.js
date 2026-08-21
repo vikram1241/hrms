@@ -58,7 +58,9 @@ const SERVICE_EXTRA = [
 
 const FNF_EXTRA = [
   { key: 'employeeId', label: 'Employee ID', type: 'text', required: false, onPdf: true },
-  { key: 'lastWorkingDay', label: 'Last working day', type: 'text', required: true, onPdf: true }
+  { key: 'lastWorkingDay', label: 'Last working day', type: 'text', required: true, onPdf: true },
+  { key: 'amount', label: 'Full & final amount', type: 'text', required: false, onPdf: true },
+  { key: 'reason', label: 'Exit / resignation reason', type: 'text', required: false, onPdf: true }
 ];
 
 /** @type {Record<string, Array<{key:string,label:string,type:string,required:boolean,onPdf?:boolean}>>} */

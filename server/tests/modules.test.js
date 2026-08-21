@@ -5,6 +5,8 @@ import app from '../app.js';
 import { authAgent } from './helpers/factories.js';
 import { getOutbox, clearOutbox } from '../services/emailService.js';
 import ExcelJS from 'exceljs';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { extractText, getDocumentProxy } from 'unpdf';
 import { computeStatutoryDeductions, computePF } from '../utils/statutoryEngine.js';
 
 before(async () => { await db.connect(); });
@@ -234,6 +236,55 @@ test('Epic 14b — generate FNF letter and email', async () => {
 
   const out = getOutbox();
   assert.ok(out.some((o) => String(o.to).includes(employee.email) || /Full & Final|Full and Final/i.test(o.subject || o.body)), 'outbox contains FNF email');
+});
+
+test('FNF template PDF placeholders are filled with employee, amount and reason', async () => {
+  const { admin, employee } = await setup();
+
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Employee: {{employeeName}}', { x: 50, y: 780, size: 12, font });
+  page.drawText('Amount: {{amount}}', { x: 50, y: 760, size: 12, font });
+  page.drawText('Reason: {{reason}}', { x: 50, y: 740, size: 12, font });
+  page.drawText('Last working day: {{lastWorkingDay}}', { x: 50, y: 720, size: 12, font });
+  const pdfBytes = await doc.save();
+
+  const created = await admin
+    .post('/api/letter-templates')
+    .field('type', 'FNFLetter')
+    .field('name', 'Placeholder FNF Template')
+    .field('title', 'FULL & FINAL SETTLEMENT')
+    .field('isDefault', 'true')
+    .attach('file', Buffer.from(pdfBytes), { filename: 'fnf-placeholder.pdf', contentType: 'application/pdf' });
+  assert.equal(created.status, 201);
+
+  const exit = await admin.post('/api/exits').send({
+    userId: employee._id,
+    resignationDate: '2026-08-01',
+    lastWorkingDay: '2026-08-15',
+    reason: 'Resignation'
+  });
+  assert.equal(exit.status, 201);
+
+  const updated = await admin.patch(`/api/exits/${exit.body.record._id}`).send({
+    fnfSettlement: { amount: 25000000, status: 'Pending' }
+  });
+  assert.equal(updated.status, 200);
+
+  const letters = await admin.post(`/api/exits/${exit.body.record._id}/letters`);
+  assert.equal(letters.status, 200);
+
+  const record = await admin.get(`/api/exits/${exit.body.record._id}`);
+  assert.ok(record.body.record.fnfLetterUrl, 'fnfLetterUrl should be created');
+
+  const pdfPath = new URL(record.body.record.fnfLetterUrl, `file://${process.cwd()}/`).pathname;
+  const pdf = await getDocumentProxy(new Uint8Array(await import('node:fs/promises').then((m) => m.readFile(pdfPath))));
+  const extracted = await extractText(pdf, { mergePages: true });
+  const text = String(extracted?.text || '');
+  assert.match(text, /Employee:\s*.*emp/i);
+  assert.match(text, /Amount:\s*.*INR\s*2,50,000\.00|Amount:\s*.*2,50,000\.00/i);
+  assert.match(text, /Reason:\s*Resignation/i);
 });
 
 test('C&F templates — create agent/distributor/wholesaler with PDF upload', async () => {
