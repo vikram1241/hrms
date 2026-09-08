@@ -4,6 +4,7 @@ services:
   mongodb:
     image: mongo:7.0
     container_name: hrms-mongodb
+    restart: unless-stopped
     ports:
       - "27017:27017"
     environment:
@@ -15,6 +16,10 @@ services:
       - mongodb_config:/data/configdb
     networks:
       - hrms-network
+    deploy:
+      resources:
+        limits:
+          memory: 2g # Set this to about half of your total server RAM
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 10s
