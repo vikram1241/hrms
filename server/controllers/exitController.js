@@ -79,30 +79,68 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
   const user = await User.findById(record.userId);
   if (!user) throw new ApiError(404, 'Employee not found');
   const company = await Company.findById(req.user.companyId);
+  const previewOnly = req.body?.previewOnly === true || req.body?.previewOnly === 'true';
 
+  const fnfFields = req.body?.fnfFields && typeof req.body.fnfFields === 'object' ? req.body.fnfFields : {};
   const name = fullName(user);
   const designation = user.employeeDetails?.designation || 'Employee';
   const doj = user.employeeDetails?.dateOfJoining ? new Date(user.employeeDetails.dateOfJoining).toDateString() : 'the date of joining';
-  const lwd = new Date(record.lastWorkingDay).toDateString();
   const companyName = company?.name || 'the Company';
+
+  const safeReason = String(fnfFields.reason || record.reason || 'Resignation').trim();
+  const safeLastWorkingDay = fnfFields.lastWorkingDay || record.lastWorkingDay;
+  const rawAmount = fnfFields.amount ?? record.fnfSettlement?.amount ?? 0;
+  const safeAmount = rawAmount != null && rawAmount !== ''
+    ? (fnfFields.amount !== undefined && fnfFields.amount !== null && fnfFields.amount !== ''
+      ? Math.round(Number(String(fnfFields.amount).replace(/[₹,\s]/g, '')) * 100)
+      : Number(rawAmount) || 0)
+    : 0;
+
+  if (safeLastWorkingDay && !Number.isNaN(new Date(safeLastWorkingDay).getTime())) {
+    record.lastWorkingDay = new Date(safeLastWorkingDay);
+  }
+  if (safeAmount != null && safeAmount !== '') {
+    record.fnfSettlement.amount = safeAmount;
+  }
+  record.reason = safeReason;
+  if (safeLastWorkingDay) record.lastWorkingDay = new Date(safeLastWorkingDay);
 
   record.relievingLetterUrl = await generateCompanyDocPdf({
     title: 'Relieving Letter', company, employeeName: name, designation, effectiveDate: record.lastWorkingDay,
     paragraphs: [
-      `This is to certify that ${name} (${designation}) has been relieved from the services of ${companyName} with effect from the close of business on ${lwd}.`,
+      `This is to certify that ${name} (${designation}) has been relieved from the services of ${companyName} with effect from the close of business on ${new Date(record.lastWorkingDay).toDateString()}.`,
       `We confirm that all dues have been settled as per company policy. We wish ${name} success in future endeavours.`
     ]
   });
   record.experienceLetterUrl = await generateCompanyDocPdf({
     title: 'Experience Letter', company, employeeName: name, designation, effectiveDate: record.lastWorkingDay,
     paragraphs: [
-      `This is to certify that ${name} was employed with ${companyName} as ${designation} from ${doj} to ${lwd}.`,
+      `This is to certify that ${name} was employed with ${companyName} as ${designation} from ${doj} to ${new Date(record.lastWorkingDay).toDateString()}.`,
       `During the tenure, their conduct and performance were found to be satisfactory.`
     ]
   });
+
+  let previewLetterUrl = null;
   try {
-    const fnfPdf = await fnfService.generateAndEmailFNF({ record, user, company, actor: req.user });
-    if (fnfPdf) record.fnfLetterUrl = fnfPdf;
+    const fnfPdf = await fnfService.generateAndEmailFNF({
+      record,
+      user,
+      company,
+      actor: req.user,
+      fnfFields: {
+        amount: safeAmount,
+        reason: safeReason,
+        lastWorkingDay: safeLastWorkingDay
+      },
+      previewOnly
+    });
+    if (fnfPdf) {
+      if (previewOnly) {
+        previewLetterUrl = fnfPdf;
+      } else {
+        record.fnfLetterUrl = fnfPdf;
+      }
+    }
   } catch (err) {
     await logActivity({ actor: req.user, action: 'exit.fnf_failed', entityType: 'ExitRecord', entityId: record._id, message: `FNF generation/email failed for ${name}: ${err.message}` });
   }
@@ -110,17 +148,19 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
   await record.save();
   await logActivity({
     actor: req.user,
-    action: 'exit.letters',
+    action: previewOnly ? 'exit.fnf_preview' : 'exit.letters',
     entityType: 'ExitRecord',
     entityId: record._id,
-    message: `Exit letters generated for ${name}`
+    message: previewOnly ? `FNF preview generated for ${name}` : `Exit letters generated for ${name}`
   });
 
   res.status(200).json({
     success: true,
-    message: 'Relieving and experience letters generated',
+    message: previewOnly ? 'FNF preview generated' : 'Relieving and experience letters generated',
     relievingLetterUrl: record.relievingLetterUrl,
-    experienceLetterUrl: record.experienceLetterUrl
+    experienceLetterUrl: record.experienceLetterUrl,
+    fnfLetterUrl: record.fnfLetterUrl,
+    previewLetterUrl
   });
 });
 
@@ -132,12 +172,7 @@ export const deleteExit = asyncHandler(async (req, res) => {
   if (record.status === 'Completed') {
     throw new ApiError(400, 'Completed exits cannot be deleted');
   }
-  if (record.relievingLetterUrl || record.experienceLetterUrl || record.fnfLetterUrl) {
-    throw new ApiError(400, 'Exit with generated letters cannot be deleted');
-  }
-  if (record.status !== 'Initiated') {
-    throw new ApiError(400, 'Only exits in Initiated status can be deleted');
-  }
+  // Allow removing exit records even after letters have been generated.
   const user = await User.findById(record.userId).select('personalDetails email');
   await record.deleteOne();
   await logActivity({

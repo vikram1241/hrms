@@ -1866,19 +1866,40 @@ export const fillTextPlaceholderPdf = async (
   const widthOf = (text, size, useBold = false) =>
     (useBold ? bold : font).widthOfTextAtSize(ascii(text), size);
 
+  const blankFieldReplacement = (templateStr) => {
+    const labelPatterns = [
+      { key: 'employeeName', regex: /(Employee\s*(?:Name|Full\s*Name)|Name)\s*:\s*[_\s]+/i },
+      { key: 'amount', regex: /Amount\s*:\s*[_\s]+/i },
+      { key: 'reason', regex: /Reason\s*:\s*[_\s]+/i },
+      { key: 'lastWorkingDay', regex: /Last\s*Working\s*Day\s*:\s*[_\s]+/i },
+      { key: 'date', regex: /Date\s*:\s*[_\s]+/i }
+    ];
+    for (const item of labelPatterns) {
+      if (!item.regex.test(templateStr)) continue;
+      const value = resolveLetterField(item.key, fieldValues) || '';
+      const replaced = templateStr.replace(item.regex, (match) => {
+        const label = match.replace(/[_\s]+$/i, '').trim();
+        return `${label}: ${value}`;
+      });
+      return replaced;
+    }
+    return templateStr;
+  };
+
   const toSegments = (templateStr) => {
+    const normalized = blankFieldReplacement(templateStr);
     const parts = [];
     const re = /\{\{\s*([^}]+?)\s*\}\}/g;
     let last = 0;
     let m;
-    while ((m = re.exec(templateStr))) {
-      if (m.index > last) parts.push({ text: templateStr.slice(last, m.index), bold: false });
+    while ((m = re.exec(normalized))) {
+      if (m.index > last) parts.push({ text: normalized.slice(last, m.index), bold: false });
       const key = String(m[1] || '').trim();
       const val = resolveLetterField(key, fieldValues);
       parts.push({ text: val || `{{${key}}}`, bold: true });
       last = m.index + m[0].length;
     }
-    if (last < templateStr.length) parts.push({ text: templateStr.slice(last), bold: false });
+    if (last < normalized.length) parts.push({ text: normalized.slice(last), bold: false });
     return parts.filter((p) => p.text !== '');
   };
 
@@ -1932,7 +1953,8 @@ export const fillTextPlaceholderPdf = async (
     if (!page) continue;
     const desiredSize = Math.max(8, Number(run.fontSize) || 12);
     const template = String(run.str || '');
-    const segments = toSegments(template);
+    const normalized = blankFieldReplacement(template);
+    const segments = toSegments(normalized);
     if (!segments.length) continue;
 
     const looksRightAligned = run.x > pageWidth * 0.55 || /^date\s*:/i.test(template.trim());

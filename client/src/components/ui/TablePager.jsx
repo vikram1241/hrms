@@ -2,7 +2,7 @@ import Pagination from '@mui/material/Pagination';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 
-const PAGE_SIZES = [10, 20, 50];
+const PAGE_SIZES = [5, 10, 20, 50];
 
 /**
  * Footer controls for table pagination (server or client).

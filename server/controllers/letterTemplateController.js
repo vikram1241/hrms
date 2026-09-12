@@ -33,17 +33,17 @@ const parseBool = (v, fallback = false) => {
 };
 
 /**
- * AppointmentLetter only: sync detected placeholders (+ body/title) from uploaded PDF.
- * Other letter types leave body as the client sent it.
+ * Extract placeholders from an uploaded PDF for all letter types.
+ * Appointment letters also sync the PDF body/title when requested.
  */
-const applyAppointmentPdfExtract = async (payload, fileRelPath, { overwriteBody = true } = {}) => {
-  if (payload.type !== 'AppointmentLetter' || !fileRelPath) return;
+const applyPdfExtract = async (payload, fileRelPath, { overwriteBody = false } = {}) => {
+  if (!fileRelPath) return;
   const extracted = await extractLetterTemplateFromPdf(fileRelPath);
   payload.detectedPlaceholders = extracted.placeholders || [];
-  if (overwriteBody && extracted.bodyParagraphs?.length) {
+  if (payload.type === 'AppointmentLetter' && overwriteBody && extracted.bodyParagraphs?.length) {
     payload.bodyParagraphs = extracted.bodyParagraphs;
   }
-  if (overwriteBody && extracted.title) {
+  if (payload.type === 'AppointmentLetter' && overwriteBody && extracted.title) {
     if (!(payload.title && String(payload.title).trim()) || payload.syncTitleFromPdf) {
       payload.title = extracted.title;
     }
@@ -101,7 +101,11 @@ export const createLetterTemplate = asyncHandler(async (req, res) => {
   if (!LETTER_TYPES.includes(type)) throw new ApiError(400, `type must be one of: ${LETTER_TYPES.join(', ')}`);
   if (!name) throw new ApiError(400, 'name is required');
 
-  const isDefault = parseBool(req.body.isDefault, false);
+  let isDefault = parseBool(req.body.isDefault, false);
+  if (!isDefault) {
+    const existingDefault = await LetterTemplate.exists({ companyId: req.user.companyId, type, active: true, isDefault: true });
+    if (!existingDefault) isDefault = true;
+  }
   if (isDefault) await clearOtherDefaults(type);
 
   const emailDefaults = DEFAULT_LETTER_EMAIL[type] || {};
@@ -121,12 +125,13 @@ export const createLetterTemplate = asyncHandler(async (req, res) => {
     active: true
   };
   if (req.file) {
-    payload.fileUrl = letterTemplateRelPath(req.file.filename);
+    payload.fileUrl = letterTemplateRelPath(type, req.file.filename);
     payload.originalFileName = req.file.originalname;
     payload.mimeType = req.file.mimetype || 'application/pdf';
-    // Appointment: prefer PDF-extracted body so generation matches the upload.
+    // Extract placeholder names from every uploaded PDF; appointment letters also
+    // sync the body/title from the uploaded PDF when requested.
     const clientBodyEmpty = !payload.bodyParagraphs.length;
-    await applyAppointmentPdfExtract(payload, payload.fileUrl, {
+    await applyPdfExtract(payload, payload.fileUrl, {
       overwriteBody: type === 'AppointmentLetter' && (clientBodyEmpty || parseBool(req.body.syncBodyFromPdf, true))
     });
     if (type === 'AppointmentLetter' && !payload.title) {
@@ -138,7 +143,7 @@ export const createLetterTemplate = asyncHandler(async (req, res) => {
     const template = await LetterTemplate.create(payload);
     res.status(201).json({ success: true, message: 'Letter template created', template: present(template) });
   } catch (err) {
-    if (req.file) await unlinkQuiet(letterTemplateRelPath(req.file.filename));
+    if (req.file) await unlinkQuiet(letterTemplateRelPath(type, req.file.filename));
     if (err?.code === 11000) throw new ApiError(409, 'A template with this name already exists for this type');
     throw err;
   }
@@ -170,32 +175,30 @@ export const updateLetterTemplate = asyncHandler(async (req, res) => {
 
   const previousFile = template.fileUrl;
   if (req.file) {
-    template.fileUrl = letterTemplateRelPath(req.file.filename);
+    template.fileUrl = letterTemplateRelPath(template.type, req.file.filename);
     template.originalFileName = req.file.originalname;
     template.mimeType = req.file.mimetype || 'application/pdf';
 
-    if (template.type === 'AppointmentLetter') {
-      const syncBody = parseBool(req.body.syncBodyFromPdf, true);
-      const patch = {
-        type: template.type,
-        title: template.title,
-        bodyParagraphs: template.bodyParagraphs,
-        detectedPlaceholders: [],
-        syncTitleFromPdf: syncBody && !(req.body.title && String(req.body.title).trim())
-      };
-      await applyAppointmentPdfExtract(patch, template.fileUrl, { overwriteBody: syncBody });
-      template.detectedPlaceholders = patch.detectedPlaceholders || [];
-      if (syncBody && patch.bodyParagraphs?.length) {
-        template.bodyParagraphs = patch.bodyParagraphs;
-      }
-      if (patch.title) template.title = patch.title;
+    const syncBody = template.type === 'AppointmentLetter' && parseBool(req.body.syncBodyFromPdf, true);
+    const patch = {
+      type: template.type,
+      title: template.title,
+      bodyParagraphs: template.bodyParagraphs,
+      detectedPlaceholders: [],
+      syncTitleFromPdf: syncBody && !(req.body.title && String(req.body.title).trim())
+    };
+    await applyPdfExtract(patch, template.fileUrl, { overwriteBody: syncBody });
+    template.detectedPlaceholders = patch.detectedPlaceholders || [];
+    if (syncBody && patch.bodyParagraphs?.length) {
+      template.bodyParagraphs = patch.bodyParagraphs;
     }
+    if (patch.title) template.title = patch.title;
   }
 
   try {
     await template.save();
   } catch (err) {
-    if (req.file) await unlinkQuiet(letterTemplateRelPath(req.file.filename));
+    if (req.file) await unlinkQuiet(letterTemplateRelPath(template.type, req.file.filename));
     if (err?.code === 11000) throw new ApiError(409, 'A template with this name already exists for this type');
     throw err;
   }
@@ -236,7 +239,6 @@ export const downloadLetterTemplateFile = asyncHandler(async (req, res) => {
 
 /** Resolve default active letter template for a type (or first active). */
 export const resolveDefaultLetterTemplate = async (type) => {
-  let tpl = await LetterTemplate.findOne({ type, active: true, isDefault: true });
-  if (!tpl) tpl = await LetterTemplate.findOne({ type, active: true }).sort({ createdAt: 1 });
+  const tpl = await LetterTemplate.findOne({ type, active: true }).sort({ isDefault: -1, createdAt: -1 });
   return tpl;
 };

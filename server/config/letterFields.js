@@ -38,17 +38,27 @@ const APPOINTMENT_EXTRA = [
 export const LETTER_FIELD_ALIASES = {
   Name: 'employeeName',
   name: 'employeeName',
+  'Employee Name': 'employeeName',
+  'Employee name': 'employeeName',
+  'Full Name': 'employeeName',
+  'Full name': 'employeeName',
   Role: 'designation',
   role: 'designation',
   Position: 'designation',
   'Date of joining': 'joiningDate',
   'date of joining': 'joiningDate',
   Date: 'date',
+  'Last Working Day': 'lastWorkingDay',
+  'Last working day': 'lastWorkingDay',
   Location: 'location',
   Address: 'address',
   Email: 'email',
   Phone: 'phone',
-  Mobile: 'phone'
+  Mobile: 'phone',
+  Amount: 'amount',
+  amount: 'amount',
+  Reason: 'reason',
+  reason: 'reason'
 };
 
 const SERVICE_EXTRA = [

@@ -11,27 +11,51 @@ import { queueMailJob } from './mailQueue.js';
  * Generate an FNFLetter (if a default template exists) and email it to the
  * employee. Returns the generated PDF relative path when created, otherwise null.
  */
-export const generateAndEmailFNF = async ({ record, user, company, actor } = {}) => {
+export const generateAndEmailFNF = async ({ record, user, company, actor, fnfFields = {}, previewOnly = false } = {}) => {
   const tpl = await resolveDefaultLetterTemplate('FNFLetter');
   if (!tpl) return null;
 
-  const name = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim();
-  const lwd = new Date(record.lastWorkingDay).toDateString();
-  const amountPaisa = Number(record?.fnfSettlement?.amount ?? 0) || 0;
+  const firstName = user.personalDetails?.firstName || '';
+  const lastName = user.personalDetails?.lastName || '';
+  const name = `${firstName} ${lastName}`.trim();
+  const department = user.employeeDetails?.department || user.department || '';
+  const email = user.email || '';
+  const phone = user.personalDetails?.phone || user.personalDetails?.mobile || user.employeeDetails?.phone || '';
+  const address = user.personalDetails?.address || user.personalDetails?.currentAddress || '';
+  const inputReason = String(fnfFields.reason ?? record?.reason ?? 'Resignation').trim() || 'Resignation';
+  const inputLastWorkingDay = fnfFields.lastWorkingDay || record?.lastWorkingDay;
+  const inputAmount = fnfFields.amount ?? record?.fnfSettlement?.amount ?? 0;
+  const normalizedAmount = Number(String(inputAmount).replace(/[₹,\s]/g, '')) || 0;
+  const amountPaisa = (fnfFields.amount !== undefined && fnfFields.amount !== null && fnfFields.amount !== '')
+    ? Math.round(normalizedAmount * 100)
+    : Number(record?.fnfSettlement?.amount ?? 0) || 0;
+  const lwd = inputLastWorkingDay ? new Date(inputLastWorkingDay).toDateString() : new Date(record.lastWorkingDay).toDateString();
+  const amountDisplay = formatINR(amountPaisa);
   const fields = {
     employeeName: name,
+    firstName,
+    lastName,
     employeeId: user.employeeDetails?.employeeId || '',
     designation: user.employeeDetails?.designation || 'Employee',
+    role: user.employeeDetails?.designation || 'Employee',
+    department,
     companyName: company?.name || 'Company',
-    amount: formatINR(amountPaisa),
-    Amount: formatINR(amountPaisa),
-    reason: record?.reason || 'Resignation',
-    Reason: record?.reason || 'Resignation',
+    email,
+    phone,
+    address,
+    amount: amountDisplay,
+    Amount: amountDisplay,
+    reason: inputReason,
+    Reason: inputReason,
     lastWorkingDay: lwd,
-    date: record.lastWorkingDay
+    lastworkingday: lwd,
+    date: inputLastWorkingDay || record.lastWorkingDay,
+    Date: inputLastWorkingDay || record.lastWorkingDay
   };
 
   const pdf = await generateLetterFromTemplate({ template: tpl, fields, company });
+  if (previewOnly) return pdf;
+
   const absPdf = path.resolve(process.cwd(), pdf);
 
   const defaults = DEFAULT_LETTER_EMAIL.FNFLetter || {};

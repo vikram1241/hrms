@@ -28,6 +28,21 @@ export const detectPlaceholdersInText = (text = '') => {
     seen.add(key);
     keys.push(key);
   }
+  const labelPatterns = [
+    { key: 'employeeName', regex: /\b(?:Employee\s*(?:Name|Full\s*Name)|Name)\s*:\s*[_\s]+/i },
+    { key: 'amount', regex: /\bAmount\s*:\s*[_\s]+/i },
+    { key: 'reason', regex: /\bReason\s*:\s*[_\s]+/i },
+    { key: 'lastWorkingDay', regex: /\bLast\s*Working\s*Day\s*:\s*[_\s]+/i },
+    { key: 'date', regex: /\bDate\s*:\s*[_\s]+/i }
+  ];
+  for (const item of labelPatterns) {
+    if (item.regex.test(String(text))) {
+      if (!seen.has(item.key)) {
+        seen.add(item.key);
+        keys.push(item.key);
+      }
+    }
+  }
   return keys;
 };
 

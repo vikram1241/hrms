@@ -55,8 +55,9 @@ app.use(cookieParser());
 // Establish a per-request tenant context store (Epic T) before any route runs.
 app.use(tenantContextMiddleware);
 
-// Avatars are public assets; sensitive documents are NOT served from here.
-app.use('/uploads/avatars', express.static(path.resolve('uploads', 'avatars')));
+// Public static assets for generated documents, templates, avatars, and other
+// user-facing files exposed through the browser.
+app.use('/uploads', express.static(path.resolve('uploads')));
 
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
 

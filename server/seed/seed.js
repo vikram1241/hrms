@@ -532,12 +532,14 @@ async function seedLetterTemplates() {
     page.drawText(d.title, { x: 48, y: 750, size: 12, font: bold });
     page.drawText('Upload a fillable letterhead PDF to replace this sample.', { x: 48, y: 720, size: 10, font });
     const bytes = await doc.save();
-    const filename = `${crypto.randomUUID()}.pdf`;
-    await fsp.writeFile(path.join(LETTER_TEMPLATE_DIR, filename), bytes);
+    const typeDir = path.resolve(LETTER_TEMPLATE_DIR, d.type);
+    await fsp.mkdir(typeDir, { recursive: true });
+    const filename = `${d.type}-${d.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').slice(0, 40) || 'template'}-${crypto.randomUUID()}.pdf`;
+    await fsp.writeFile(path.join(typeDir, filename), bytes);
 
     await LetterTemplate.create({
       ...d,
-      fileUrl: letterTemplateRelPath(filename),
+      fileUrl: letterTemplateRelPath(d.type, filename),
       originalFileName: `${d.name}.pdf`,
       mimeType: 'application/pdf',
       isDefault: true,

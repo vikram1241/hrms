@@ -213,6 +213,52 @@ test('Letter templates — set up offer/appointment/service/FNF templates with P
   assert.equal((await emp.get('/api/letter-templates')).status, 403);
 });
 
+test('Letter templates — newest FNF upload and newest create become the default template', async () => {
+  const { admin, emp } = await setup();
+
+  const first = await admin.post('/api/letter-templates').send({
+    type: 'FNFLetter', name: 'Legacy FNF', title: 'Legacy Full & Final Settlement',
+    bodyParagraphs: ['Dear {{employeeName}}, your full and final settlement is enclosed.'],
+    isDefault: true
+  });
+  assert.equal(first.status, 201);
+  assert.equal(first.body.template.isDefault, true);
+
+  const created = await admin.post('/api/letter-templates').send({
+    type: 'FNFLetter', name: 'Standard FNF', title: 'Full & Final Settlement',
+    bodyParagraphs: ['Dear {{employeeName}}, your full and final settlement is enclosed.']
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.template.isDefault, true);
+
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+  const uploaded = await admin
+    .post('/api/letter-templates')
+    .field('type', 'FNFLetter')
+    .field('name', 'Uploaded FNF Template')
+    .field('title', 'FULL & FINAL SETTLEMENT')
+    .attach('file', pdf, { filename: 'uploaded-fnf.pdf', contentType: 'application/pdf' });
+  assert.equal(uploaded.status, 201);
+  assert.equal(uploaded.body.template.isDefault, true);
+
+  const list = await admin.get('/api/letter-templates').query({ type: 'FNFLetter' });
+  const defaultTpl = list.body.data.find((t) => t.isDefault);
+  assert.ok(defaultTpl, 'there should be a default FNF template');
+
+  const newest = await admin.post('/api/letter-templates').send({
+    type: 'FNFLetter', name: 'Newest FNF', title: 'Newest Full & Final Settlement',
+    bodyParagraphs: ['Dear {{employeeName}}, this is the latest FNF.']
+  });
+  assert.equal(newest.status, 201);
+  assert.equal(newest.body.template.isDefault, true);
+
+  const list2 = await admin.get('/api/letter-templates').query({ type: 'FNFLetter' });
+  const newestDefault = list2.body.data.find((t) => t.isDefault);
+  assert.equal(newestDefault.name, 'Newest FNF');
+
+  assert.equal((await emp.get('/api/letter-templates')).status, 403);
+});
+
 test('Epic 14b — generate FNF letter and email', async () => {
   const { admin, employee } = await setup();
   await clearOutbox();
@@ -236,6 +282,50 @@ test('Epic 14b — generate FNF letter and email', async () => {
 
   const out = getOutbox();
   assert.ok(out.some((o) => String(o.to).includes(employee.email) || /Full & Final|Full and Final/i.test(o.subject || o.body)), 'outbox contains FNF email');
+});
+
+test('FNF preview generates without emailing the employee', async () => {
+  const { admin, employee } = await setup();
+  await clearOutbox();
+
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Employee: {{employeeName}}', { x: 50, y: 780, size: 12, font });
+  page.drawText('Amount: {{amount}}', { x: 50, y: 760, size: 12, font });
+  page.drawText('Reason: {{reason}}', { x: 50, y: 740, size: 12, font });
+  page.drawText('Last working day: {{lastWorkingDay}}', { x: 50, y: 720, size: 12, font });
+  const pdfBytes = await doc.save();
+
+  await admin
+    .post('/api/letter-templates')
+    .field('type', 'FNFLetter')
+    .field('name', 'Preview FNF Template')
+    .field('title', 'FULL & FINAL SETTLEMENT')
+    .field('isDefault', 'true')
+    .attach('file', Buffer.from(pdfBytes), { filename: 'preview-fnf.pdf', contentType: 'application/pdf' });
+
+  const exit = await admin.post('/api/exits').send({
+    userId: employee._id,
+    resignationDate: '2026-08-01',
+    lastWorkingDay: '2026-08-15',
+    reason: 'Resignation'
+  });
+
+  const preview = await admin.post(`/api/exits/${exit.body.record._id}/letters`).send({
+    previewOnly: true,
+    fnfFields: {
+      amount: '75000',
+      lastWorkingDay: '2026-08-20',
+      reason: 'Better opportunity'
+    }
+  });
+  assert.equal(preview.status, 200);
+  assert.ok(preview.body.previewLetterUrl, 'preview should return a document URL');
+  assert.equal(preview.body.fnfLetterUrl, null, 'preview should not mark the letter as issued');
+
+  const outbox = getOutbox();
+  assert.equal(outbox.length, 0, 'preview should not email the employee');
 });
 
 test('FNF template PDF placeholders are filled with employee, amount and reason', async () => {
@@ -285,6 +375,104 @@ test('FNF template PDF placeholders are filled with employee, amount and reason'
   assert.match(text, /Employee:\s*.*emp/i);
   assert.match(text, /Amount:\s*.*INR\s*2,50,000\.00|Amount:\s*.*2,50,000\.00/i);
   assert.match(text, /Reason:\s*Resignation/i);
+});
+
+test('FNF uploaded PDF with blank label fields fills employee values before issuing', async () => {
+  const { admin, employee } = await setup();
+  await clearOutbox();
+
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Employee Name: ______________________', { x: 50, y: 780, size: 12, font });
+  page.drawText('Amount: ______________________', { x: 50, y: 760, size: 12, font });
+  page.drawText('Reason: ______________________', { x: 50, y: 740, size: 12, font });
+  page.drawText('Last Working Day: ______________________', { x: 50, y: 720, size: 12, font });
+  const pdfBytes = await doc.save();
+
+  await admin
+    .post('/api/letter-templates')
+    .field('type', 'FNFLetter')
+    .field('name', 'Blank-field FNF Template')
+    .field('title', 'FULL & FINAL SETTLEMENT')
+    .field('isDefault', 'true')
+    .attach('file', Buffer.from(pdfBytes), { filename: 'blank-field-fnf.pdf', contentType: 'application/pdf' });
+
+  const exit = await admin.post('/api/exits').send({
+    userId: employee._id,
+    resignationDate: '2026-08-01',
+    lastWorkingDay: '2026-08-15',
+    reason: 'Resignation'
+  });
+
+  const letters = await admin.post(`/api/exits/${exit.body.record._id}/letters`).send({
+    fnfFields: {
+      amount: '75000',
+      lastWorkingDay: '2026-08-20',
+      reason: 'Better opportunity'
+    }
+  });
+  assert.equal(letters.status, 200);
+
+  const record = await admin.get(`/api/exits/${exit.body.record._id}`);
+  const pdfPath = new URL(record.body.record.fnfLetterUrl, `file://${process.cwd()}/`).pathname;
+  const pdf = await getDocumentProxy(new Uint8Array(await import('node:fs/promises').then((m) => m.readFile(pdfPath))));
+  const extracted = await extractText(pdf, { mergePages: true });
+  const text = String(extracted?.text || '');
+  assert.match(text, /Employee Name:\s*.*emp/i);
+  assert.match(text, /Amount:\s*.*75,000|Amount:\s*.*INR/i);
+  assert.match(text, /Reason:\s*Better opportunity/i);
+  assert.match(text, /Last Working Day:\s*.*2026-08-20|Last Working Day:\s*.*20.*Aug.*2026/i);
+});
+
+test('FNF letter accepts user-entered settlement values before issuing', async () => {
+  const { admin, employee } = await setup();
+  await clearOutbox();
+
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Employee: {{employeeName}}', { x: 50, y: 780, size: 12, font });
+  page.drawText('Amount: {{amount}}', { x: 50, y: 760, size: 12, font });
+  page.drawText('Reason: {{reason}}', { x: 50, y: 740, size: 12, font });
+  page.drawText('Last working day: {{lastWorkingDay}}', { x: 50, y: 720, size: 12, font });
+  const pdfBytes = await doc.save();
+
+  await admin
+    .post('/api/letter-templates')
+    .field('type', 'FNFLetter')
+    .field('name', 'Prompted FNF Template')
+    .field('title', 'FULL & FINAL SETTLEMENT')
+    .field('isDefault', 'true')
+    .attach('file', Buffer.from(pdfBytes), { filename: 'prompted-fnf.pdf', contentType: 'application/pdf' });
+
+  const exit = await admin.post('/api/exits').send({
+    userId: employee._id,
+    resignationDate: '2026-08-01',
+    lastWorkingDay: '2026-08-15',
+    reason: 'Resignation'
+  });
+
+  const letters = await admin.post(`/api/exits/${exit.body.record._id}/letters`).send({
+    fnfFields: {
+      amount: '75000',
+      lastWorkingDay: '2026-08-20',
+      reason: 'Better opportunity'
+    }
+  });
+  assert.equal(letters.status, 200);
+
+  const record = await admin.get(`/api/exits/${exit.body.record._id}`);
+  const pdfPath = new URL(record.body.record.fnfLetterUrl, `file://${process.cwd()}/`).pathname;
+  const pdf = await getDocumentProxy(new Uint8Array(await import('node:fs/promises').then((m) => m.readFile(pdfPath))));
+  const extracted = await extractText(pdf, { mergePages: true });
+  const text = String(extracted?.text || '');
+  assert.match(text, /Amount:\s*.*INR\s*75,000\.00|Amount:\s*.*75,000\.00/i);
+  assert.match(text, /Reason:\s*Better opportunity/i);
+  assert.match(text, /Last working day:\s*.*20.*Aug.*2026|Last working day:\s*.*2026-08-20/i);
+
+  const outbox = getOutbox();
+  assert.ok(outbox.some((o) => String(o.to).includes(employee.email)), 'FNF email should be sent to the employee email');
 });
 
 test('C&F templates — create agent/distributor/wholesaler with PDF upload', async () => {
