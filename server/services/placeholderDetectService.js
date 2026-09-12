@@ -175,12 +175,13 @@ export const locatePlaceholderTextRuns = async (relOrAbs) => {
       pageHeight = viewport.height;
     }
     const content = await page.getTextContent();
+    const pageRuns = [];
     for (const item of content.items || []) {
       const str = String(item?.str || '');
       if (!str.includes('{{')) continue;
       const tr = item.transform || [1, 0, 0, 1, 0, 0];
       const fontSize = Math.hypot(tr[0], tr[1]) || Number(item.height) || 12;
-      runs.push({
+      pageRuns.push({
         pageIndex,
         str,
         x: tr[4],
@@ -191,6 +192,22 @@ export const locatePlaceholderTextRuns = async (relOrAbs) => {
         placeholders: detectPlaceholdersInText(str)
       });
     }
+
+    pageRuns.sort((a, b) => a.y - b.y || a.x - b.x);
+    const merged = [];
+    for (const run of pageRuns) {
+      const prev = merged[merged.length - 1];
+      const sameLine = prev && prev.pageIndex === run.pageIndex && Math.abs(prev.y - run.y) <= 1.2;
+      const adjacent = prev && run.x >= prev.x && (run.x - (prev.x + prev.width)) <= 6;
+      if (sameLine && adjacent) {
+        prev.str = `${prev.str}${run.str}`;
+        prev.width = Math.max(prev.width, run.x + run.width - prev.x);
+        prev.placeholders = [...new Set([...prev.placeholders, ...run.placeholders])];
+      } else {
+        merged.push(run);
+      }
+    }
+    runs.push(...merged);
   }
 
   return { pageWidth, pageHeight, runs };

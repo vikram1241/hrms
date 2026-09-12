@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { resolveDefaultLetterTemplate } from '../controllers/letterTemplateController.js';
-import { generateLetterFromTemplate } from './pdfService.js';
+import { GENERATED_DOC_DIR, generateLetterFromTemplate } from './pdfService.js';
 import { DEFAULT_LETTER_EMAIL } from '../models/LetterTemplate.js';
 import { applyLetterText } from '../config/letterFields.js';
 import { formatINR } from '../utils/money.js';
@@ -53,7 +53,7 @@ export const generateAndEmailFNF = async ({ record, user, company, actor, fnfFie
     Date: inputLastWorkingDay || record.lastWorkingDay
   };
 
-  const pdf = await generateLetterFromTemplate({ template: tpl, fields, company });
+  const pdf = await generateLetterFromTemplate({ template: tpl, fields, company, destDir: GENERATED_DOC_DIR });
   if (previewOnly) return pdf;
 
   const absPdf = path.resolve(process.cwd(), pdf);

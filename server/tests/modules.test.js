@@ -284,6 +284,48 @@ test('Epic 14b — generate FNF letter and email', async () => {
   assert.ok(out.some((o) => String(o.to).includes(employee.email) || /Full & Final|Full and Final/i.test(o.subject || o.body)), 'outbox contains FNF email');
 });
 
+test('FNF pdfs are saved under generated docs, not offers', async () => {
+  const { admin, employee } = await setup();
+
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Employee: {{employeeName}}', { x: 50, y: 780, size: 12, font });
+  page.drawText('Amount: {{amount}}', { x: 50, y: 760, size: 12, font });
+  page.drawText('Reason: {{reason}}', { x: 50, y: 740, size: 12, font });
+  page.drawText('Last working day: {{lastWorkingDay}}', { x: 50, y: 720, size: 12, font });
+  const pdfBytes = await doc.save();
+
+  await admin
+    .post('/api/letter-templates')
+    .field('type', 'FNFLetter')
+    .field('name', 'Generated-doc FNF Template')
+    .field('title', 'FULL & FINAL SETTLEMENT')
+    .field('isDefault', 'true')
+    .attach('file', Buffer.from(pdfBytes), { filename: 'generated-doc-fnf.pdf', contentType: 'application/pdf' });
+
+  const exit = await admin.post('/api/exits').send({
+    userId: employee._id,
+    resignationDate: '2026-08-01',
+    lastWorkingDay: '2026-08-15',
+    reason: 'Resignation'
+  });
+
+  const letters = await admin.post(`/api/exits/${exit.body.record._id}/letters`).send({
+    fnfFields: {
+      amount: '75000',
+      lastWorkingDay: '2026-08-20',
+      reason: 'Better opportunity'
+    }
+  });
+  assert.equal(letters.status, 200);
+
+  const record = await admin.get(`/api/exits/${exit.body.record._id}`);
+  assert.ok(record.body.record.fnfLetterUrl, 'fnfLetterUrl should be created');
+  assert.match(record.body.record.fnfLetterUrl, /\/uploads\/documents\/generated\//, 'FNF PDF should be stored in generated documents folder');
+  assert.doesNotMatch(record.body.record.fnfLetterUrl, /\/uploads\/offers\//, 'FNF PDF should not be stored in offers folder');
+});
+
 test('FNF preview generates without emailing the employee', async () => {
   const { admin, employee } = await setup();
   await clearOutbox();
@@ -375,6 +417,53 @@ test('FNF template PDF placeholders are filled with employee, amount and reason'
   assert.match(text, /Employee:\s*.*emp/i);
   assert.match(text, /Amount:\s*.*INR\s*2,50,000\.00|Amount:\s*.*2,50,000\.00/i);
   assert.match(text, /Reason:\s*Resignation/i);
+});
+
+test('FNF PDF generation does not duplicate values when label + placeholder appear on one line', async () => {
+  const { admin, employee } = await setup();
+
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Employee Name: {{employeeName}}', { x: 50, y: 780, size: 12, font });
+  page.drawText('Amount: _________', { x: 50, y: 760, size: 12, font });
+  page.drawText('Reason: {{reason}}', { x: 50, y: 740, size: 12, font });
+  page.drawText('Last Working Day: _________', { x: 50, y: 720, size: 12, font });
+  const pdfBytes = await doc.save();
+
+  await admin
+    .post('/api/letter-templates')
+    .field('type', 'FNFLetter')
+    .field('name', 'No-duplicate FNF Template')
+    .field('title', 'FULL & FINAL SETTLEMENT')
+    .field('isDefault', 'true')
+    .attach('file', Buffer.from(pdfBytes), { filename: 'no-duplicate-fnf.pdf', contentType: 'application/pdf' });
+
+  const exit = await admin.post('/api/exits').send({
+    userId: employee._id,
+    resignationDate: '2026-08-01',
+    lastWorkingDay: '2026-08-15',
+    reason: 'Resignation'
+  });
+
+  const letters = await admin.post(`/api/exits/${exit.body.record._id}/letters`).send({
+    fnfFields: {
+      amount: '75000',
+      lastWorkingDay: '2026-08-20',
+      reason: 'Better opportunity'
+    }
+  });
+  assert.equal(letters.status, 200);
+
+  const record = await admin.get(`/api/exits/${exit.body.record._id}`);
+  const pdfPath = new URL(record.body.record.fnfLetterUrl, `file://${process.cwd()}/`).pathname;
+  const pdf = await getDocumentProxy(new Uint8Array(await import('node:fs/promises').then((m) => m.readFile(pdfPath))));
+  const extracted = await extractText(pdf, { mergePages: true });
+  const text = String(extracted?.text || '');
+  assert.match(text, /Employee Name:\s*.*emp/i);
+  assert.doesNotMatch(text, /Employee Name:\s*.*emp.*emp/i);
+  assert.match(text, /Amount:\s*.*75,000|Amount:\s*.*INR/i);
+  assert.doesNotMatch(text, /Amount:\s*.*75,000.*75,000|Amount:\s*.*INR.*INR/i);
 });
 
 test('FNF uploaded PDF with blank label fields fills employee values before issuing', async () => {

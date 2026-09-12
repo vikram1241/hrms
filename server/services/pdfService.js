@@ -1600,7 +1600,7 @@ export const generateLetterFromTemplate = async ({
   template,
   fields = {},
   company,
-  destDir = OFFER_DIR
+  destDir = GENERATED_DOC_DIR
 }) => {
   const title = template?.title || template?.name || 'Letter';
   const companyName = company?.name || fields.companyName || 'Company';
