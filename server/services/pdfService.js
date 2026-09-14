@@ -1927,18 +1927,22 @@ export const fillTextPlaceholderPdf = async (
     (useBold ? bold : font).widthOfTextAtSize(ascii(text), size);
 
   const blankFieldReplacement = (templateStr) => {
+    // If the string already contains {{placeholder}}, do not perform blank underline replacement
+    // so explicit placeholders like "Date: {{date}}" are never double-replaced.
+    if (/\{\{[^}]+\}\}/.test(templateStr)) return templateStr;
+
     const labelPatterns = [
-      { key: 'employeeName', regex: /(Employee\s*(?:Name|Full\s*Name)|Name)\s*:\s*[_\s]+/i },
-      { key: 'amount', regex: /Amount\s*:\s*[_\s]+/i },
-      { key: 'reason', regex: /Reason\s*:\s*[_\s]+/i },
-      { key: 'lastWorkingDay', regex: /Last\s*Working\s*Day\s*:\s*[_\s]+/i },
-      { key: 'date', regex: /Date\s*:\s*[_\s]+/i }
+      { key: 'employeeName', regex: /(Employee\s*(?:Name|Full\s*Name)|Name)\s*:\s*_{2,}/i },
+      { key: 'amount', regex: /Amount\s*:\s*_{2,}/i },
+      { key: 'reason', regex: /Reason\s*:\s*_{2,}/i },
+      { key: 'lastWorkingDay', regex: /Last\s*Working\s*Day\s*:\s*_{2,}/i },
+      { key: 'date', regex: /Date\s*:\s*_{2,}/i }
     ];
     for (const item of labelPatterns) {
       if (!item.regex.test(templateStr)) continue;
       const value = resolveLetterField(item.key, fieldValues) || '';
       const replaced = templateStr.replace(item.regex, (match) => {
-        const label = match.replace(/[_\s]+$/i, '').trim();
+        const label = match.replace(/:\s*_{2,}\s*$/i, '').trim();
         return `${label}: ${value}`;
       });
       return replaced;
@@ -2015,11 +2019,10 @@ export const fillTextPlaceholderPdf = async (
     if (!page) continue;
     const desiredSize = Math.max(8, Number(run.fontSize) || 12);
     const template = String(run.str || '');
-    const normalized = blankFieldReplacement(template);
-    const segments = toSegments(normalized);
+    const segments = toSegments(template);
     if (!segments.length) continue;
 
-    const looksRightAligned = run.x > pageWidth * 0.55 || /^date\s*:/i.test(template.trim());
+    const looksRightAligned = run.x > pageWidth * 0.55;
     const rightEdge = run.x + run.width;
     const maxWidth = Math.max(60, pageWidth - (looksRightAligned ? rightMargin : run.x) - rightMargin);
     const isPurePlaceholder = /^\{\{\s*[^}]+\s*\}\}$/.test(template.trim());
