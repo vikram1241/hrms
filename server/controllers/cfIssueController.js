@@ -8,6 +8,7 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { fieldsForType, validateCFFields, applyCFFieldDefaults } from '../config/cfFields.js';
 import { generateCFAgreementPdf, resolveTemplateFilePath } from '../services/pdfService.js';
+import { generateCFAgreementDocxAndPdf } from '../services/docxService.js';
 import { sendCFAgreement } from '../services/emailService.js';
 
 const presentIssue = (doc) => {
@@ -35,11 +36,11 @@ export const listCFIssues = asyncHandler(async (req, res) => {
 /**
  * POST /api/cf-issues
  * Body: { templateId, recipientEmail, fields: { ...blanks } }
- * Loads the C&F template, fills blanks, generates PDF, emails attachment.
+ * Loads the C&F template, fills blanks, generates PDF/DOCX, emails attachment.
  */
 export const createAndSendCFIssue = asyncHandler(async (req, res) => {
   const { templateId, fields: rawFields = {}, action, sendEmail: reqSendEmail } = req.body;
-  const shouldSendEmail = reqSendEmail !== false && action !== 'download';
+  const shouldSendEmail = reqSendEmail !== false && action !== 'download' && action !== 'download-docx';
 
   if (!mongoose.isValidObjectId(templateId)) throw new ApiError(400, 'Valid templateId is required');
   const template = await CFTemplate.findById(templateId);
@@ -68,13 +69,34 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'A valid recipientEmail is required if provided');
   }
 
-  const pdfFileUrl = await generateCFAgreementPdf({
-    type: template.type,
-    fields,
-    company,
-    templateTitle: template.name,
-    templateFileUrl: template.fileUrl
-  });
+  let pdfFileUrl = null;
+  let docxFileUrl = null;
+
+  const isDocxTemplate = Boolean(template.fileUrl && /\.docx$/i.test(template.fileUrl));
+  if (isDocxTemplate || template.type === 'CFAgent') {
+    try {
+      const docxResult = await generateCFAgreementDocxAndPdf({
+        fields,
+        company,
+        templateFileUrl: template.fileUrl,
+        templateTitle: template.name
+      });
+      pdfFileUrl = docxResult.pdfFileUrl;
+      docxFileUrl = docxResult.docxFileUrl;
+    } catch (docxErr) {
+      console.warn('DOCX pipeline generation warning, attempting PDF fallback:', docxErr?.message || docxErr);
+    }
+  }
+
+  if (!pdfFileUrl) {
+    pdfFileUrl = await generateCFAgreementPdf({
+      type: template.type,
+      fields,
+      company,
+      templateTitle: template.name,
+      templateFileUrl: template.fileUrl
+    });
+  }
 
   const issue = await CFIssue.create({
     companyId: req.user.companyId,
@@ -85,6 +107,7 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
     partyName: fields.partyName || '',
     fieldValues: fields,
     pdfFileUrl,
+    docxFileUrl,
     status: 'generated',
     createdBy: req.user._id
   });
@@ -137,5 +160,18 @@ export const downloadCFIssuePdf = asyncHandler(async (req, res) => {
   if (!fs.existsSync(abs)) throw new ApiError(404, 'PDF file missing');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="cf-agreement-${issue._id}.pdf"`);
+  fs.createReadStream(abs).pipe(res);
+});
+
+/** GET /api/cf-issues/:id/docx — stream generated Word (.docx). */
+export const downloadCFIssueDocx = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid id');
+  const issue = await CFIssue.findById(req.params.id);
+  if (!issue) throw new ApiError(404, 'C&F issue not found');
+  if (!issue.docxFileUrl) throw new ApiError(404, 'DOCX file not generated for this issue');
+  const abs = resolveTemplateFilePath(issue.docxFileUrl) || path.resolve(issue.docxFileUrl);
+  if (!fs.existsSync(abs)) throw new ApiError(404, 'DOCX file missing');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename="cf-agreement-${issue._id}.docx"`);
   fs.createReadStream(abs).pipe(res);
 });

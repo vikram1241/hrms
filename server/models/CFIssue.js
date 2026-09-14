@@ -15,6 +15,7 @@ const CFIssueSchema = new mongoose.Schema({
   partyName: { type: String, trim: true, default: '' },
   fieldValues: { type: Map, of: String, default: {} },
   pdfFileUrl: { type: String, required: true },
+  docxFileUrl: { type: String, default: null },
   status: { type: String, enum: ['generated', 'sent', 'failed'], default: 'generated', index: true },
   sentAt: { type: Date, default: null },
   emailError: { type: String, default: null },

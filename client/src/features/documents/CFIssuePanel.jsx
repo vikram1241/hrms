@@ -1,8 +1,8 @@
-import { UuseEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { Truck, Send, Eye, Download, FileDown } from 'lucide-react';
+import { Truck, Send, Eye, Download, FileDown, FileText } from 'lucide-react';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
@@ -15,12 +15,14 @@ import {
   listCFIssues,
   createAndSendCFIssue,
   cfIssuePdfUrl,
-  downloadCFIssuePdfBlob
+  cfIssueDocxUrl,
+  downloadCFIssuePdfBlob,
+  downloadCFIssueDocxBlob
 } from '../../api/cfIssues.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
-const triggerBlobDownload = (data, filename) => {
-  const blob = new Blob([data], { type: 'application/pdf' });
+const triggerBlobDownload = (data, filename, mime = 'application/pdf') => {
+  const blob = new Blob([data], { type: mime });
   const blobUrl = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = blobUrl;
@@ -94,8 +96,17 @@ export default function CFIssuePanel() {
     try {
       const res = await getCFIssueFields(currentSelected.type);
       setFieldDefs(res.fields || []);
+      const now = new Date();
+      const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const todayStr = `${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+      const nextYearStr = `${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear() + 1}`;
+
       const next = {};
-      for (const f of res.fields || []) next[f.key] = '';
+      for (const f of res.fields || []) {
+        if (f.key === 'effectiveFrom') next[f.key] = todayStr;
+        else if (f.key === 'effectiveTo') next[f.key] = nextYearStr;
+        else next[f.key] = '';
+      }
       setValues(next);
     } catch (err) {
       dispatch(notifyError(err.uiMessage || 'Could not load template fields'));
@@ -162,10 +173,15 @@ export default function CFIssuePanel() {
         sendEmail: dialogMode === 'mail'
       });
 
-      if (dialogMode === 'download' && res.issue?._id) {
+      if (dialogMode === 'download-docx' && res.issue?._id) {
+        const downloadRes = await downloadCFIssueDocxBlob(res.issue._id);
+        const filename = `${(res.issue.partyName || res.issue.templateName || 'cf-agreement').replace(/[^\w.-]+/g, '_')}.docx`;
+        triggerBlobDownload(downloadRes.data, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        dispatch(notifySuccess('C&F agreement generated and downloaded as Word (.docx).'));
+      } else if (dialogMode === 'download' && res.issue?._id) {
         const downloadRes = await downloadCFIssuePdfBlob(res.issue._id);
         const filename = `${(res.issue.partyName || res.issue.templateName || 'cf-agreement').replace(/[^\w.-]+/g, '_')}.pdf`;
-        triggerBlobDownload(downloadRes.data, filename);
+        triggerBlobDownload(downloadRes.data, filename, 'application/pdf');
         dispatch(notifySuccess('C&F agreement generated and downloaded.'));
       } else {
         dispatch(notifySuccess(res.message || 'C&F agreement processed.'));
@@ -181,9 +197,16 @@ export default function CFIssuePanel() {
   };
 
   const emailFields = fieldDefs.filter((f) => f.key === 'recipientEmail' || f.type === 'email');
-  const otherFields = fieldDefs.filter((f) => f.key !== 'recipientEmail' && f.type !== 'email');
-  const shortFields = otherFields.filter((f) => f.type !== 'textarea');
-  const longFields = otherFields.filter((f) => f.type === 'textarea');
+  const agencyFields = fieldDefs.filter((f) => f.section === 'agency' || ['partyName', 'partyPan', 'partnerName', 'partnerPan', 'territory'].includes(f.key));
+  const addressFields = fieldDefs.filter((f) => f.section === 'address' || f.key === 'partyAddress' || f.type === 'textarea');
+  const periodWitnessFields = fieldDefs.filter((f) => f.section === 'period' || f.section === 'witnesses' || ['effectiveFrom', 'effectiveTo', 'companyWitness', 'agentWitness'].includes(f.key));
+  const remainingFields = fieldDefs.filter(
+    (f) =>
+      f.key !== 'recipientEmail' &&
+      !agencyFields.some((x) => x.key === f.key) &&
+      !addressFields.some((x) => x.key === f.key) &&
+      !periodWitnessFields.some((x) => x.key === f.key)
+  );
 
   return (
     <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -220,7 +243,7 @@ export default function CFIssuePanel() {
                 <p className="text-xs text-muted">
                   {CF_TYPE_LABELS[selected.type]} agreement template
                   {selected.hasFile && (
-                    <span> · {selected.originalFileName || 'PDF file attached'}</span>
+                    <span> · {selected.originalFileName || 'Master agreement attached'}</span>
                   )}
                 </p>
               </div>
@@ -233,7 +256,7 @@ export default function CFIssuePanel() {
                 disabled={!templateId || loadingFields || busy || downloadingTemplate}
                 className="w-full sm:w-auto"
               >
-                <Send size={16} /> Fill blanks and mail
+                <Send size={16} /> Fill &amp; mail PDF
               </Button>
 
               <Button
@@ -243,7 +266,17 @@ export default function CFIssuePanel() {
                 disabled={!templateId || loadingFields || busy || downloadingTemplate}
                 className="w-full sm:w-auto"
               >
-                <FileDown size={16} /> Fill blanks and download
+                <FileDown size={16} /> Fill and Download PDF
+              </Button>
+
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => openFillDialog('download-docx')}
+                disabled={!templateId || loadingFields || busy || downloadingTemplate}
+                className="w-full sm:w-auto"
+              >
+                <FileText size={16} /> Fill and Download Word (.docx)
               </Button>
 
               <Button
@@ -253,9 +286,9 @@ export default function CFIssuePanel() {
                 disabled={!templateId || !selected?.hasFile || downloadingTemplate || busy}
                 loading={downloadingTemplate}
                 className="w-full sm:w-auto"
-                title={!selected?.hasFile ? 'No file uploaded for this template' : 'Download uploaded agreement PDF'}
+                title={!selected?.hasFile ? 'No file uploaded for this template' : 'Download master template'}
               >
-                <Download size={16} /> Download
+                <Download size={16} /> Master template
               </Button>
             </div>
 
@@ -285,9 +318,21 @@ export default function CFIssuePanel() {
                       />
                     </div>
                   </div>
-                  <a className="btn-ghost p-1.5 text-primary-600" href={cfIssuePdfUrl(i._id)} target="_blank" rel="noreferrer" title="View PDF">
-                    <Eye size={16} />
-                  </a>
+                  <div className="flex items-center gap-1">
+                    {i.docxFileUrl && (
+                      <a
+                        className="btn-ghost p-1.5 text-blue-600"
+                        href={cfIssueDocxUrl(i._id)}
+                        download
+                        title="Download Word (.docx)"
+                      >
+                        <FileText size={16} />
+                      </a>
+                    )}
+                    <a className="btn-ghost p-1.5 text-primary-600" href={cfIssuePdfUrl(i._id)} target="_blank" rel="noreferrer" title="View PDF">
+                      <Eye size={16} />
+                    </a>
+                  </div>
                 </li>
               ))}
               {!issues.data?.data?.length && (
@@ -302,12 +347,22 @@ export default function CFIssuePanel() {
         open={dialogOpen}
         onClose={closeDialog}
         maxWidth="md"
-        title={dialogMode === 'download' ? 'Fill blanks & download C&F agreement' : 'Fill blanks & mail C&F agreement'}
+        title={
+          dialogMode === 'download-docx'
+            ? 'Fill blanks & download Word (.docx)'
+            : dialogMode === 'download'
+              ? 'Fill blanks & download C&F agreement PDF'
+              : 'Fill blanks & mail C&F agreement PDF'
+        }
         subtitle={selected ? `${CF_TYPE_LABELS[selected.type] || selected.type} · ${selected.name}` : ''}
         onSubmit={handleSubmitDialog}
         loading={busy}
         submitLabel={
-          dialogMode === 'download' ? (
+          dialogMode === 'download-docx' ? (
+            <>
+              <FileText size={16} /> Generate &amp; download .docx
+            </>
+          ) : dialogMode === 'download' ? (
             <>
               <Download size={16} /> Generate &amp; download PDF
             </>
@@ -326,7 +381,7 @@ export default function CFIssuePanel() {
             {emailFields.length > 0 && (
               <section>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                  {dialogMode === 'download' ? 'Delivery (optional for download)' : 'Delivery'}
+                  {dialogMode === 'download' || dialogMode === 'download-docx' ? 'Delivery (optional for download)' : 'Delivery'}
                 </p>
                 <div className="grid grid-cols-1 gap-3">
                   {emailFields.map((f) => (
@@ -337,7 +392,7 @@ export default function CFIssuePanel() {
                       autoFocus
                       required={dialogMode === 'mail' && f.required}
                       type="email"
-                      label={dialogMode === 'download' ? `${f.label} (optional)` : f.label}
+                      label={dialogMode !== 'mail' ? `${f.label} (optional)` : f.label}
                       value={values[f.key] || ''}
                       onChange={(e) => setVal(f.key, e.target.value)}
                     />
@@ -346,11 +401,13 @@ export default function CFIssuePanel() {
               </section>
             )}
 
-            {shortFields.length > 0 && (
+            {agencyFields.length > 0 && (
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Agreement details</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  Agency &amp; Partner Details (Page 1 of Agreement)
+                </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {shortFields.map((f) => (
+                  {agencyFields.map((f) => (
                     <TextField
                       key={f.key}
                       size="small"
@@ -365,11 +422,13 @@ export default function CFIssuePanel() {
               </section>
             )}
 
-            {longFields.length > 0 && (
+            {addressFields.length > 0 && (
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Address &amp; notes</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  Registered Office Address (Page 1 of Agreement)
+                </p>
                 <div className="grid grid-cols-1 gap-3">
-                  {longFields.map((f) => (
+                  {addressFields.map((f) => (
                     <TextField
                       key={f.key}
                       size="small"
@@ -377,6 +436,46 @@ export default function CFIssuePanel() {
                       required={f.required}
                       multiline
                       minRows={2}
+                      label={f.label}
+                      value={values[f.key] || ''}
+                      onChange={(e) => setVal(f.key, e.target.value)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {periodWitnessFields.length > 0 && (
+              <section>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  Appointment Period &amp; Witnesses (Pages 2 &amp; 16 of Agreement)
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {periodWitnessFields.map((f) => (
+                    <TextField
+                      key={f.key}
+                      size="small"
+                      fullWidth
+                      required={f.required}
+                      label={f.label}
+                      value={values[f.key] || ''}
+                      onChange={(e) => setVal(f.key, e.target.value)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {remainingFields.length > 0 && (
+              <section>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Additional Details</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {remainingFields.map((f) => (
+                    <TextField
+                      key={f.key}
+                      size="small"
+                      fullWidth
+                      required={f.required}
                       label={f.label}
                       value={values[f.key] || ''}
                       onChange={(e) => setVal(f.key, e.target.value)}

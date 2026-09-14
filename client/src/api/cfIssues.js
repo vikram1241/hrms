@@ -8,3 +8,7 @@ export const createAndSendCFIssue = (body) => api.post('/cf-issues', body).then(
 export const cfIssuePdfUrl = (id) => `/api/cf-issues/${id}/pdf`;
 export const downloadCFIssuePdfBlob = (id) =>
   api.get(`/cf-issues/${id}/pdf`, { responseType: 'blob' });
+export const cfIssueDocxUrl = (id) => `/api/cf-issues/${id}/docx`;
+export const downloadCFIssueDocxBlob = (id) =>
+  api.get(`/cf-issues/${id}/docx`, { responseType: 'blob' });
+
