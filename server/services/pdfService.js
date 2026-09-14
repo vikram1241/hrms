@@ -1601,13 +1601,17 @@ export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENER
   ]);
   const seal = logoWithStamp || stamp;
 
+  // When a combined "Company Stamp and Signature" asset (logoWithStamp) is present,
+  // omit the standalone signature — the combined seal already includes both.
+  const shouldDrawSig = Boolean(sig && !logoWithStamp);
+
   // Position signature and stamp together at the sign-off block (side-by-side under the closing section)
   const marginX = Math.max(20, signOffX);
   let sigD = null;
   let sigX = marginX;
   let sigY = signOffLowestY !== null ? Math.max(65, signOffLowestY - 50) : 110;
 
-  if (sig) {
+  if (shouldDrawSig) {
     sigD = sig.scaleToFit(130, 44);
     sigY = signOffLowestY !== null ? Math.max(65, signOffLowestY - sigD.height - 8) : 110;
     page.drawImage(sig, {
@@ -1618,10 +1622,12 @@ export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENER
     });
   }
 
+  let sealD = null;
+  let sealY = 85;
   if (seal) {
-    const sealD = seal.scaleToFit(85, 85);
+    sealD = seal.scaleToFit(85, 85);
     const sealX = sigD ? sigX + sigD.width + 16 : marginX;
-    const sealY = signOffLowestY !== null ? Math.max(60, signOffLowestY - sealD.height - 4) : 85;
+    sealY = signOffLowestY !== null ? Math.max(60, signOffLowestY - sealD.height - 4) : 85;
     page.drawImage(seal, {
       x: sealX,
       y: sealY,
@@ -1632,8 +1638,9 @@ export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENER
   }
 
   // Only draw "Authorized Signatory" line and text if the template does NOT already have it
-  if (!hasAuthorizedSignatoryText && (company?.branding?.authorizedSignatoryName || sig || seal)) {
-    const lineY = sigY - 6;
+  if (!hasAuthorizedSignatoryText && (company?.branding?.authorizedSignatoryName || shouldDrawSig || seal)) {
+    const lowestAssetY = Math.min(...[sigD ? sigY : null, sealD ? sealY : null].filter((v) => v !== null));
+    const lineY = (lowestAssetY !== null ? lowestAssetY : sigY) - 6;
     page.drawLine({ start: { x: marginX, y: lineY }, end: { x: marginX + 160, y: lineY }, thickness: 1, color: black });
     page.drawText(ascii(`Authorized Signatory: ${company?.branding?.authorizedSignatoryName || ''}`), {
       x: marginX, y: lineY - 14, size: 9, font, color: black

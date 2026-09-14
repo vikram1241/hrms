@@ -110,9 +110,39 @@ export const formatCFAgreementData = (fields = {}, company = null) => {
  * @param {object} data
  * @returns {Promise<Buffer>}
  */
-export const renderDocxTemplate = async (templateAbsPath, data) => {
+export const renderDocxTemplate = async (templateAbsPath, data, company = null) => {
   const content = await fsp.readFile(templateAbsPath, 'binary');
   const zip = new PizZip(content);
+
+  // Dynamically inject uploaded company stamp/signature if available
+  if (company?.branding) {
+    const sealRel = company.branding.logoWithStampUrl || company.branding.stampUrl || company.branding.signatureUrl;
+    if (sealRel) {
+      const candidates = [
+        path.resolve(ROOT, sealRel),
+        path.resolve(ROOT, '..', sealRel),
+        path.resolve('/app', sealRel),
+        path.resolve(ROOT, 'uploads', sealRel.replace(/^uploads[/\\]/, '')),
+        path.resolve(ROOT, 'server', 'uploads', sealRel.replace(/^uploads[/\\]/, '')),
+        path.resolve(ROOT, 'data', 'uploads', sealRel.replace(/^uploads[/\\]/, ''))
+      ];
+      for (const cand of candidates) {
+        if (fs.existsSync(cand)) {
+          try {
+            const sealBytes = await fsp.readFile(cand);
+            if (zip.files['word/media/image2.png']) {
+              zip.file('word/media/image2.png', sealBytes);
+            } else if (zip.files['word/media/image2.jpg']) {
+              zip.file('word/media/image2.jpg', sealBytes);
+            }
+          } catch (e) {
+            console.warn('Could not inject company stamp into DOCX:', e);
+          }
+          break;
+        }
+      }
+    }
+  }
 
   const doc = new Docxtemplater(zip, {
     paragraphLoop: true,
@@ -224,7 +254,7 @@ export const generateCFAgreementDocxAndPdf = async ({ fields = {}, company = nul
   }
 
   const data = formatCFAgreementData(fields, company);
-  const docxBuffer = await renderDocxTemplate(templatePath, data);
+  const docxBuffer = await renderDocxTemplate(templatePath, data, company);
 
   const uuid = crypto.randomUUID();
   const docxDest = path.join(CF_ISSUED_DIR, `cf-${uuid}.docx`);
