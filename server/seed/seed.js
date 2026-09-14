@@ -5,8 +5,49 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { fileURLToPath } from 'node:url';
 import connectDB from '../config/db.js';
 import Company, { PLATFORM_SLUG } from '../models/Company.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SEED_ASSETS_DIR = path.join(__dirname, 'assets');
+
+/**
+ * Copy a permanent seed asset from server/seed/assets into uploads directories,
+ * ensuring it is present across both runtime container mounts and host data folders.
+ */
+const copySeedAssetToUploads = (sourceFilename, subDir, destFilename) => {
+  const candidateSources = [
+    path.join(SEED_ASSETS_DIR, sourceFilename),
+    path.resolve(process.cwd(), sourceFilename),
+    path.resolve(process.cwd(), '..', sourceFilename),
+    path.resolve('uploads', subDir, sourceFilename),
+    path.resolve(process.cwd(), 'data', 'uploads', subDir, sourceFilename),
+    path.resolve(process.cwd(), '..', 'data', 'uploads', subDir, sourceFilename)
+  ];
+  const srcPath = candidateSources.find((p) => fs.existsSync(p));
+  if (!srcPath) return null;
+
+  const targetDirs = [
+    path.resolve('uploads', subDir),
+    path.resolve(process.cwd(), 'data', 'uploads', subDir),
+    path.resolve(process.cwd(), '..', 'data', 'uploads', subDir)
+  ];
+
+  let written = false;
+  for (const td of targetDirs) {
+    try {
+      fs.mkdirSync(td, { recursive: true });
+      fs.copyFileSync(srcPath, path.join(td, destFilename));
+      written = true;
+    } catch {
+      // ignore
+    }
+  }
+
+  return written ? `uploads/${subDir}/${destFilename}` : null;
+};
 import User from '../models/User.js';
 import SalaryStructureTemplate from '../models/SalaryStructureTemplate.js';
 import EmployeeSalaryAssignment from '../models/EmployeeSalaryAssignment.js';
@@ -151,9 +192,19 @@ const run = async () => {
   });
 
   // --- Demo company with statutory config + branding ---
+  const logoRel = copySeedAssetToUploads('mirus-logo.jpg', 'company', 'mirus-logo.jpg');
+  const stampRel = copySeedAssetToUploads('mirus-stamp.jpg', 'company', 'mirus-stamp.jpg');
+  const signatureRel = copySeedAssetToUploads('mirus-signature.jpg', 'company', 'mirus-signature.jpg');
+
   const company = await Company.create({
     slug: 'mirus', name: 'Mirus Med Sciences', status: 'active', contactEmail: 'hr@mirus.com',
-    branding: { authorizedSignatoryName: 'Priya Sharma', authorizedSignatoryDesignation: 'HR Manager' },
+    branding: {
+      authorizedSignatoryName: 'Priya Sharma',
+      authorizedSignatoryDesignation: 'HR Manager',
+      logoUrl: logoRel,
+      stampUrl: stampRel,
+      signatureUrl: signatureRel
+    },
     statutory: { gstin: '29ABCDE1234F1Z5', cin: 'U12345KA2020PTC000001' },
     address: addr(),
     // Prefer company-stored SMTP (Company Settings). Optionally hydrate from
@@ -525,22 +576,36 @@ async function seedLetterTemplates() {
   ];
 
   for (const d of defaults) {
-    // Minimal blank PDF so View works out of the box; replace with branded letterhead anytime.
-    const doc = await PDFDocument.create();
-    const page = doc.addPage([595, 842]);
-    const font = await doc.embedFont(StandardFonts.Helvetica);
-    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-    page.drawText('Mirus Med Sciences', { x: 48, y: 780, size: 16, font: bold });
-    page.drawText(d.title, { x: 48, y: 750, size: 12, font: bold });
-    page.drawText('Upload a fillable letterhead PDF to replace this sample.', { x: 48, y: 720, size: 10, font });
-    const bytes = await doc.save();
-    const filename = `${crypto.randomUUID()}.pdf`;
-    await fsp.writeFile(path.join(LETTER_TEMPLATE_DIR, filename), bytes);
+    let fileUrl = null;
+    let originalFileName = `${d.name}.pdf`;
+
+    if (d.type === 'FNFLetter') {
+      const fnfRel = copySeedAssetToUploads('FNF_Settlement_Letter_Template.pdf', 'letter-templates', 'FNF_Settlement_Letter_Template.pdf');
+      if (fnfRel) {
+        fileUrl = fnfRel;
+        originalFileName = 'FNF_Settlement_Letter_Template.pdf';
+      }
+    }
+
+    if (!fileUrl) {
+      // Minimal blank PDF so View works out of the box; replace with branded letterhead anytime.
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([595, 842]);
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+      page.drawText('Mirus Med Sciences', { x: 48, y: 780, size: 16, font: bold });
+      page.drawText(d.title, { x: 48, y: 750, size: 12, font: bold });
+      page.drawText('Upload a fillable letterhead PDF to replace this sample.', { x: 48, y: 720, size: 10, font });
+      const bytes = await doc.save();
+      const filename = `${crypto.randomUUID()}.pdf`;
+      await fsp.writeFile(path.join(LETTER_TEMPLATE_DIR, filename), bytes);
+      fileUrl = letterTemplateRelPath(filename);
+    }
 
     await LetterTemplate.create({
       ...d,
-      fileUrl: letterTemplateRelPath(filename),
-      originalFileName: `${d.name}.pdf`,
+      fileUrl,
+      originalFileName,
       mimeType: 'application/pdf',
       isDefault: true,
       active: true
