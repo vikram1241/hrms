@@ -2,20 +2,38 @@ import { useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { Truck, Send, Eye, FilePenLine } from 'lucide-react';
+import { Truck, Send, Eye, Download, FileDown } from 'lucide-react';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import Spinner from '../../components/ui/Spinner.jsx';
 import FormDialog from '../../components/ui/FormDialog.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { listCFTemplates, CF_TYPE_LABELS } from '../../api/cfTemplates.js';
-import { getCFIssueFields, listCFIssues, createAndSendCFIssue, cfIssuePdfUrl } from '../../api/cfIssues.js';
+import { listCFTemplates, downloadCFTemplateFileBlob, CF_TYPE_LABELS } from '../../api/cfTemplates.js';
+import {
+  getCFIssueFields,
+  listCFIssues,
+  createAndSendCFIssue,
+  cfIssuePdfUrl,
+  downloadCFIssuePdfBlob
+} from '../../api/cfIssues.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
+
+const triggerBlobDownload = (data, filename) => {
+  const blob = new Blob([data], { type: 'application/pdf' });
+  const blobUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(blobUrl);
+};
 
 /**
  * Documents Center panel: pick a C&F template, then fill blanks in a modal
- * and generate + email the agreement PDF.
+ * and generate + email or download the agreement PDF, or download the blank template.
  */
 export default function CFIssuePanel() {
   const dispatch = useDispatch();
@@ -24,22 +42,57 @@ export default function CFIssuePanel() {
 
   const [templateId, setTemplateId] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState('mail'); // 'mail' | 'download'
   const [fieldDefs, setFieldDefs] = useState([]);
   const [values, setValues] = useState({});
   const [loadingFields, setLoadingFields] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   const selected = useMemo(
     () => (templates.data?.data || []).find((t) => t._id === templateId) || null,
     [templates.data, templateId]
   );
 
-  const openFillDialog = async () => {
-    if (!templateId || !selected) return dispatch(notifyError('Select a C&F template first.'));
+  // Auto-select first active template when list loads if none currently selected
+  useEffect(() => {
+    const list = templates.data?.data || [];
+    if (list.length > 0 && (!templateId || !list.some((t) => t._id === templateId))) {
+      setTemplateId(list[0]._id);
+    }
+  }, [templates.data, templateId]);
+
+  // Re-fetch templates and issues whenever user switches back to this window/tab
+  useEffect(() => {
+    const handleFocus = () => {
+      templates.reload();
+      issues.reload();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [templates, issues]);
+
+  const openFillDialog = async (mode = 'mail') => {
+    let currentId = templateId;
+    let freshTemplates = templates.data?.data || [];
+    try {
+      const refreshed = await templates.reload();
+      if (refreshed?.data) freshTemplates = refreshed.data;
+    } catch { /* use existing */ }
+
+    if (!currentId && freshTemplates.length > 0) {
+      currentId = freshTemplates[0]._id;
+      setTemplateId(currentId);
+    }
+
+    const currentSelected = freshTemplates.find((t) => t._id === currentId) || null;
+    if (!currentId || !currentSelected) return dispatch(notifyError('Select a C&F template first.'));
+
+    setDialogMode(mode);
     setLoadingFields(true);
     setDialogOpen(true);
     try {
-      const res = await getCFIssueFields(selected.type);
+      const res = await getCFIssueFields(currentSelected.type);
       setFieldDefs(res.fields || []);
       const next = {};
       for (const f of res.fields || []) next[f.key] = '';
@@ -61,18 +114,68 @@ export default function CFIssuePanel() {
 
   const setVal = (key, value) => setValues((v) => ({ ...v, [key]: value }));
 
-  const send = async (e) => {
+  const handleDownloadUploadedPdf = async () => {
+    let currentId = templateId;
+    let freshTemplates = templates.data?.data || [];
+    try {
+      const refreshed = await templates.reload();
+      if (refreshed?.data) freshTemplates = refreshed.data;
+    } catch { /* use existing */ }
+
+    if (!currentId && freshTemplates.length > 0) {
+      currentId = freshTemplates[0]._id;
+      setTemplateId(currentId);
+    }
+
+    const currentSelected = freshTemplates.find((t) => t._id === currentId) || null;
+    if (!currentId || !currentSelected) return dispatch(notifyError('Select a C&F template first.'));
+    if (!currentSelected.hasFile) return dispatch(notifyError('No uploaded PDF file for this template.'));
+
+    setDownloadingTemplate(true);
+    try {
+      const res = await downloadCFTemplateFileBlob(currentSelected._id);
+      const filename = currentSelected.originalFileName || `${(currentSelected.name || 'cf-template').replace(/[^\w.-]+/g, '_')}.pdf`;
+      triggerBlobDownload(res.data, filename);
+      dispatch(notifySuccess(`Downloaded ${filename}`));
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Failed to download template PDF'));
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  };
+
+  const handleSubmitDialog = async (e) => {
     e.preventDefault();
     if (!templateId) return dispatch(notifyError('Select a C&F template.'));
+
+    if (dialogMode === 'mail' && !String(values.recipientEmail || '').trim()) {
+      return dispatch(notifyError('Recipient email is required to send agreement.'));
+    }
+
     setBusy(true);
     try {
-      const res = await createAndSendCFIssue({ templateId, fields: values, recipientEmail: values.recipientEmail });
-      dispatch(notifySuccess(res.message || 'C&F agreement processed.'));
+      const res = await createAndSendCFIssue({
+        templateId,
+        fields: values,
+        recipientEmail: values.recipientEmail?.trim(),
+        action: dialogMode,
+        sendEmail: dialogMode === 'mail'
+      });
+
+      if (dialogMode === 'download' && res.issue?._id) {
+        const downloadRes = await downloadCFIssuePdfBlob(res.issue._id);
+        const filename = `${(res.issue.partyName || res.issue.templateName || 'cf-agreement').replace(/[^\w.-]+/g, '_')}.pdf`;
+        triggerBlobDownload(downloadRes.data, filename);
+        dispatch(notifySuccess('C&F agreement generated and downloaded.'));
+      } else {
+        dispatch(notifySuccess(res.message || 'C&F agreement processed.'));
+      }
+
       setBusy(false);
       closeDialog(true);
       issues.reload();
     } catch (err) {
-      dispatch(notifyError(err.uiMessage));
+      dispatch(notifyError(err.uiMessage || 'Operation failed'));
       setBusy(false);
     }
   };
@@ -90,7 +193,7 @@ export default function CFIssuePanel() {
             <Truck size={18} className="text-primary-600" /> Generate &amp; send C&amp;F agreement
           </h3>
           <p className="mb-4 text-sm text-muted">
-            Select a template, fill party details (name, address, territory, email), then generate and email. Date, place and margin default automatically when left blank.
+            Select a template, fill party details (name, address, territory, email), then generate and email or download. Date, place and margin default automatically when left blank.
           </p>
 
           <div className="space-y-3">
@@ -101,6 +204,7 @@ export default function CFIssuePanel() {
               label="C&F template"
               value={templateId}
               onChange={(e) => setTemplateId(e.target.value)}
+              onFocus={() => templates.reload()}
             >
               <MenuItem value="">Select template…</MenuItem>
               {(templates.data?.data || []).map((t) => (
@@ -113,13 +217,47 @@ export default function CFIssuePanel() {
             {selected && (
               <div className="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm">
                 <p className="font-medium text-ink">{selected.name}</p>
-                <p className="text-xs text-muted">{CF_TYPE_LABELS[selected.type]} agreement template</p>
+                <p className="text-xs text-muted">
+                  {CF_TYPE_LABELS[selected.type]} agreement template
+                  {selected.hasFile && (
+                    <span> · {selected.originalFileName || 'PDF file attached'}</span>
+                  )}
+                </p>
               </div>
             )}
 
-            <Button onClick={openFillDialog} disabled={!templateId || loadingFields} className="w-full sm:w-auto">
-              <FilePenLine size={16} /> Fill blanks &amp; send
-            </Button>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Button
+                type="button"
+                onClick={() => openFillDialog('mail')}
+                disabled={!templateId || loadingFields || busy || downloadingTemplate}
+                className="w-full sm:w-auto"
+              >
+                <Send size={16} /> Fill blanks and mail
+              </Button>
+
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => openFillDialog('download')}
+                disabled={!templateId || loadingFields || busy || downloadingTemplate}
+                className="w-full sm:w-auto"
+              >
+                <FileDown size={16} /> Fill blanks and download
+              </Button>
+
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleDownloadUploadedPdf}
+                disabled={!templateId || !selected?.hasFile || downloadingTemplate || busy}
+                loading={downloadingTemplate}
+                className="w-full sm:w-auto"
+                title={!selected?.hasFile ? 'No file uploaded for this template' : 'Download uploaded agreement PDF'}
+              >
+                <Download size={16} /> Download
+              </Button>
+            </div>
 
             {!templates.data?.data?.length && !templates.loading && (
               <p className="text-sm text-muted">No C&amp;F templates yet. Add them under Setup Templates → C&amp;F Templates.</p>
@@ -164,14 +302,20 @@ export default function CFIssuePanel() {
         open={dialogOpen}
         onClose={closeDialog}
         maxWidth="md"
-        title="Fill C&F agreement blanks"
-        subtitle={selected ? `${CF_TYPE_LABELS[selected.type]} · ${selected.name}` : ''}
-        onSubmit={send}
+        title={dialogMode === 'download' ? 'Fill blanks & download C&F agreement' : 'Fill blanks & mail C&F agreement'}
+        subtitle={selected ? `${CF_TYPE_LABELS[selected.type] || selected.type} · ${selected.name}` : ''}
+        onSubmit={handleSubmitDialog}
         loading={busy}
         submitLabel={
-          <>
-            <Send size={16} /> Generate &amp; email PDF
-          </>
+          dialogMode === 'download' ? (
+            <>
+              <Download size={16} /> Generate &amp; download PDF
+            </>
+          ) : (
+            <>
+              <Send size={16} /> Generate &amp; email PDF
+            </>
+          )
         }
         formId="cf-issue-form"
       >
@@ -181,7 +325,9 @@ export default function CFIssuePanel() {
           <div className="space-y-5 py-1">
             {emailFields.length > 0 && (
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Delivery</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  {dialogMode === 'download' ? 'Delivery (optional for download)' : 'Delivery'}
+                </p>
                 <div className="grid grid-cols-1 gap-3">
                   {emailFields.map((f) => (
                     <TextField
@@ -189,9 +335,9 @@ export default function CFIssuePanel() {
                       size="small"
                       fullWidth
                       autoFocus
-                      required={f.required}
+                      required={dialogMode === 'mail' && f.required}
                       type="email"
-                      label={f.label}
+                      label={dialogMode === 'download' ? `${f.label} (optional)` : f.label}
                       value={values[f.key] || ''}
                       onChange={(e) => setVal(f.key, e.target.value)}
                     />

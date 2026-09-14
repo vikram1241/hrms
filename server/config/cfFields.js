@@ -31,9 +31,7 @@ const OPTIONAL_LEGAL = [
 
 /** @type {Record<string, Array<{key:string,label:string,type:string,required:boolean,onPdf?:boolean}>>} */
 export const CF_FIELDS_BY_TYPE = {
-  CFAgent: [...CF_COMMON_SEND_FIELDS, ...PARTY, ...OPTIONAL_LEGAL],
-  CFDistributor: [...CF_COMMON_SEND_FIELDS, ...PARTY, ...OPTIONAL_LEGAL],
-  CFWholesaler: [...CF_COMMON_SEND_FIELDS, ...PARTY, ...OPTIONAL_LEGAL]
+  CFAgent: [...CF_COMMON_SEND_FIELDS, ...PARTY, ...OPTIONAL_LEGAL]
 };
 
 export const fieldsForType = (type) => CF_FIELDS_BY_TYPE[type] || CF_FIELDS_BY_TYPE.CFAgent;

@@ -7,7 +7,7 @@ import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { fieldsForType, validateCFFields, applyCFFieldDefaults } from '../config/cfFields.js';
-import { generateCFAgreementPdf } from '../services/pdfService.js';
+import { generateCFAgreementPdf, resolveTemplateFilePath } from '../services/pdfService.js';
 import { sendCFAgreement } from '../services/emailService.js';
 
 const presentIssue = (doc) => {
@@ -38,13 +38,14 @@ export const listCFIssues = asyncHandler(async (req, res) => {
  * Loads the C&F template, fills blanks, generates PDF, emails attachment.
  */
 export const createAndSendCFIssue = asyncHandler(async (req, res) => {
-  const { templateId, fields: rawFields = {} } = req.body;
+  const { templateId, fields: rawFields = {}, action, sendEmail: reqSendEmail } = req.body;
+  const shouldSendEmail = reqSendEmail !== false && action !== 'download';
 
   if (!mongoose.isValidObjectId(templateId)) throw new ApiError(400, 'Valid templateId is required');
   const template = await CFTemplate.findById(templateId);
   if (!template) throw new ApiError(404, 'C&F template not found');
   if (!template.active) throw new ApiError(400, 'Template is inactive');
-  if (!template.fileUrl && !['CFAgent', 'CFDistributor', 'CFWholesaler'].includes(template.type)) {
+  if (!template.fileUrl && template.type !== 'CFAgent') {
     throw new ApiError(400, 'Template has no uploaded agreement file');
   }
 
@@ -52,12 +53,19 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
   const fields = applyCFFieldDefaults({ ...rawFields }, company);
   if (req.body.recipientEmail) fields.recipientEmail = req.body.recipientEmail;
 
-  const missing = validateCFFields(template.type, fields);
+  let missing = validateCFFields(template.type, fields);
+  if (!shouldSendEmail) {
+    missing = missing.filter((label) => !label.toLowerCase().includes('email'));
+  }
   if (missing.length) throw new ApiError(400, `Missing required fields: ${missing.join(', ')}`);
 
-  const recipientEmail = String(fields.recipientEmail || '').trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
-    throw new ApiError(400, 'A valid recipientEmail is required');
+  let recipientEmail = String(fields.recipientEmail || '').trim().toLowerCase();
+  if (shouldSendEmail) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+      throw new ApiError(400, 'A valid recipientEmail is required to send agreement');
+    }
+  } else if (recipientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+    throw new ApiError(400, 'A valid recipientEmail is required if provided');
   }
 
   const pdfFileUrl = await generateCFAgreementPdf({
@@ -73,7 +81,7 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
     templateId: template._id,
     type: template.type,
     templateName: template.name,
-    recipientEmail,
+    recipientEmail: recipientEmail || req.user.email || 'download@manual',
     partyName: fields.partyName || '',
     fieldValues: fields,
     pdfFileUrl,
@@ -81,34 +89,42 @@ export const createAndSendCFIssue = asyncHandler(async (req, res) => {
     createdBy: req.user._id
   });
 
-  const abs = path.resolve(pdfFileUrl);
-  const typeLabel = CF_TEMPLATE_TYPE_LABELS[template.type] || template.name;
-  const mailResult = await sendCFAgreement({
-    to: recipientEmail,
-    partyName: fields.partyName || 'Partner',
-    typeLabel,
-    brandName: company?.name,
-    pdfPath: abs,
-    fileName: `${(template.name || 'cf-agreement').replace(/[^\w.-]+/g, '_')}.pdf`
-  });
+  if (shouldSendEmail) {
+    const abs = resolveTemplateFilePath(pdfFileUrl) || path.resolve(pdfFileUrl);
+    const typeLabel = CF_TEMPLATE_TYPE_LABELS[template.type] || template.name;
+    const mailResult = await sendCFAgreement({
+      to: recipientEmail,
+      partyName: fields.partyName || 'Partner',
+      typeLabel,
+      brandName: company?.name,
+      pdfPath: abs,
+      fileName: `${(template.name || 'cf-agreement').replace(/[^\w.-]+/g, '_')}.pdf`
+    });
 
-  if (mailResult.delivered) {
-    issue.status = 'sent';
-    issue.sentAt = new Date();
-    issue.emailError = null;
-  } else {
-    issue.status = mailResult.mode === 'stub' ? 'generated' : 'failed';
-    issue.emailError = mailResult.error || (mailResult.mode === 'stub' ? 'SMTP not configured — PDF generated but not emailed' : 'Email failed');
+    if (mailResult.delivered) {
+      issue.status = 'sent';
+      issue.sentAt = new Date();
+      issue.emailError = null;
+    } else {
+      issue.status = mailResult.mode === 'stub' ? 'generated' : 'failed';
+      issue.emailError = mailResult.error || (mailResult.mode === 'stub' ? 'SMTP not configured — PDF generated but not emailed' : 'Email failed');
+    }
+    await issue.save();
+
+    return res.status(201).json({
+      success: true,
+      message: issue.status === 'sent'
+        ? `C&F agreement generated and emailed to ${recipientEmail}`
+        : `C&F agreement generated. Email not delivered: ${issue.emailError}`,
+      issue: presentIssue(issue),
+      email: { delivered: Boolean(mailResult.delivered), mode: mailResult.mode, error: mailResult.error || null }
+    });
   }
-  await issue.save();
 
   res.status(201).json({
     success: true,
-    message: issue.status === 'sent'
-      ? `C&F agreement generated and emailed to ${recipientEmail}`
-      : `C&F agreement generated. Email not delivered: ${issue.emailError}`,
-    issue: presentIssue(issue),
-    email: { delivered: Boolean(mailResult.delivered), mode: mailResult.mode, error: mailResult.error || null }
+    message: 'C&F agreement generated successfully.',
+    issue: presentIssue(issue)
   });
 });
 
@@ -117,7 +133,7 @@ export const downloadCFIssuePdf = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid id');
   const issue = await CFIssue.findById(req.params.id);
   if (!issue) throw new ApiError(404, 'C&F issue not found');
-  const abs = path.resolve(issue.pdfFileUrl);
+  const abs = resolveTemplateFilePath(issue.pdfFileUrl) || path.resolve(issue.pdfFileUrl);
   if (!fs.existsSync(abs)) throw new ApiError(404, 'PDF file missing');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="cf-agreement-${issue._id}.pdf"`);

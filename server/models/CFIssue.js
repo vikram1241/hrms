@@ -11,7 +11,7 @@ const CFIssueSchema = new mongoose.Schema({
   templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'CFTemplate', required: true, index: true },
   type: { type: String, enum: CF_TEMPLATE_TYPES, required: true, index: true },
   templateName: { type: String, trim: true },
-  recipientEmail: { type: String, required: true, trim: true, lowercase: true, index: true },
+  recipientEmail: { type: String, trim: true, lowercase: true, default: '', index: true },
   partyName: { type: String, trim: true, default: '' },
   fieldValues: { type: Map, of: String, default: {} },
   pdfFileUrl: { type: String, required: true },

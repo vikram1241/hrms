@@ -6,3 +6,5 @@ export const getCFIssueFields = (type) =>
 export const listCFIssues = () => api.get('/cf-issues').then((r) => r.data);
 export const createAndSendCFIssue = (body) => api.post('/cf-issues', body).then((r) => r.data);
 export const cfIssuePdfUrl = (id) => `/api/cf-issues/${id}/pdf`;
+export const downloadCFIssuePdfBlob = (id) =>
+  api.get(`/cf-issues/${id}/pdf`, { responseType: 'blob' });

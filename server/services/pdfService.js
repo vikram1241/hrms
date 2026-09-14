@@ -2138,9 +2138,22 @@ export const fillAcroFormPdf = async (sourceRelPath, fieldValues = {}) => {
   return relPath(file);
 };
 
+export const resolveTemplateFilePath = (relOrAbs) => {
+  if (!relOrAbs) return null;
+  if (path.isAbsolute(relOrAbs) && fs.existsSync(relOrAbs)) return relOrAbs;
+  const candidates = [
+    path.resolve(ROOT, relOrAbs),
+    path.resolve(relOrAbs),
+    path.resolve(ROOT, '..', 'data', relOrAbs),
+    path.resolve(ROOT, 'data', relOrAbs),
+    path.resolve('/app', relOrAbs)
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+};
+
 /** True when the PDF has at least one AcroForm field. */
 export const pdfHasAcroForms = async (sourceRelPath) => {
-  const sourceAbs = path.resolve(ROOT, sourceRelPath);
+  const sourceAbs = resolveTemplateFilePath(sourceRelPath) || path.resolve(ROOT, sourceRelPath);
   if (!fs.existsSync(sourceAbs)) return false;
   try {
     const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
@@ -2151,35 +2164,219 @@ export const pdfHasAcroForms = async (sourceRelPath) => {
 };
 
 /**
+ * Fill an uploaded C&F agreement PDF template.
+ * Preserves all original pages of the template document, overlays filled blank fields
+ * (party name, registered office address, territory, execution date, witnesses),
+ * and appends an official executed Schedule I (Commercial Terms & Appointment Particulars) sheet.
+ */
+export const fillTemplateCFAgreementPdf = async ({
+  templateAbsPath,
+  fields = {},
+  company,
+  templateTitle
+}) => {
+  const v = (k, fallback = '') => String(fields[k] ?? fallback).trim();
+  let bytes;
+  try {
+    bytes = await fsp.readFile(templateAbsPath);
+  } catch {
+    return null;
+  }
+
+  let doc;
+  try {
+    doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    if (doc.getPageCount() === 0) return null;
+  } catch (err) {
+    console.warn('C&F uploaded template could not be loaded as PDF Document:', err?.message);
+    return null;
+  }
+
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  // Overlay detected blank lines or placeholders on the existing pages
+  try {
+    const { getDocumentProxy } = await import('unpdf');
+    const unDoc = await getDocumentProxy(new Uint8Array(bytes));
+    const pageCount = Math.min(doc.getPageCount(), unDoc.numPages);
+
+    for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+      const page = await unDoc.getPage(pageIdx + 1);
+      const textContent = await page.getTextContent();
+      const pdfPage = doc.getPage(pageIdx);
+
+      for (const it of textContent.items || []) {
+        const str = String(it.str || '');
+        const x = it.transform?.[4] || 20;
+        const y = it.transform?.[5] || 100;
+        const h = Math.max(it.height || 12, 10);
+        const w = it.width || 100;
+
+        if (/AND\s*[\.\s]{4,}/i.test(str)) {
+          // Party Name on preamble
+          if (fields.partyName) {
+            pdfPage.drawRectangle({ x: x + 35, y: y - 2, width: 230, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.partyName), { x: x + 37, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/Office[\.\s]{4,}/i.test(str)) {
+          // Party Address
+          if (fields.partyAddress) {
+            pdfPage.drawRectangle({ x: x + 38, y: y - 2, width: Math.max(w - 60, 220), height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.partyAddress.slice(0, 75)), { x: x + 40, y, size: 8.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/by\s*[\.\s]{4,}.*?Partner/i.test(str)) {
+          // Representative / Partner
+          const rep = fields.witness1 || fields.partyName;
+          if (rep) {
+            pdfPage.drawRectangle({ x: x + 16, y: y - 2, width: 200, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(rep), { x: x + 18, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/State of\s*[-_\.\s]{3,}/i.test(str)) {
+          // Territory in body
+          if (fields.territory) {
+            pdfPage.drawRectangle({ x: x + 380, y: y - 2, width: 90, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.territory), { x: x + 382, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/[-_]{4,}\s*and the Company has agreed/i.test(str)) {
+          // Territory on recital
+          if (fields.territory) {
+            pdfPage.drawRectangle({ x, y: y - 2, width: 70, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.territory), { x: x + 2, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/effective from\s*[\.\s]{3,}/i.test(str)) {
+          // Effective date
+          const dateStr = [fields.agreementDay, fields.agreementMonth, fields.agreementYear ? `20${fields.agreementYear}` : ''].filter(Boolean).join(' ');
+          if (dateStr) {
+            pdfPage.drawRectangle({ x: x + 120, y: y - 2, width: 110, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(dateStr), { x: x + 122, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/Named Agent\s*[\.\s]{4,}/i.test(str)) {
+          // Agent sign on signing page
+          if (fields.partyName) {
+            pdfPage.drawRectangle({ x: x + 230, y: y - 2, width: 220, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.partyName), { x: x + 232, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/Through its Partner\s*[\.\s]{4,}/i.test(str)) {
+          // Partner sign on signing page
+          const partner = fields.witness1 || fields.partyName;
+          if (partner) {
+            pdfPage.drawRectangle({ x, y: y - 2, width: 140, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(partner), { x: x + 2, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('C&F PDF text analysis overlay warning:', err?.message || err);
+  }
+
+  // Append official executed Schedule of Commercial Terms & Appointment Particulars
+  const schedPage = doc.addPage([595.2, 841.92]);
+  const companyName = company?.name || 'Mirus Med Sciences Private Limited';
+  const partyName = v('partyName', 'C&F Agency');
+  const executionDate = [v('agreementDay'), v('agreementMonth'), v('agreementYear') ? `20${v('agreementYear')}` : ''].filter(Boolean).join(' ') || 'As Executed';
+
+  schedPage.drawText('SCHEDULE I: APPOINTMENT PARTICULARS & COMMERCIAL TERMS', {
+    x: 48,
+    y: 790,
+    size: 13,
+    font: bold,
+    color: rgb(0.1, 0.2, 0.4)
+  });
+  schedPage.drawText(ascii(`${templateTitle || 'C&F Agency Agreement'} — Executed Particulars`), {
+    x: 48,
+    y: 772,
+    size: 10,
+    font,
+    color: rgb(0.3, 0.3, 0.3)
+  });
+
+  const particulars = [
+    ['C&F Agency Name', partyName],
+    ['Registered Office / Address', v('partyAddress', '—')],
+    ['Assigned Territory', v('territory', '—')],
+    ['Agreement Execution Date', executionDate],
+    ['Place of Execution', v('agreementPlace', '—')],
+    ['Agency Trade Margin', v('margin', '—')],
+    ['Godown / Warehouse Address', v('godownAddress', '—')],
+    ['Monthly Sales Target', v('monthlyTarget', '—')],
+    ['Security Deposit', v('securityDeposit', '—')],
+    ['Official Contact Email', v('recipientEmail', '—')],
+    ['Witness 1', v('witness1', '—')],
+    ['Witness 2', v('witness2', '—')]
+  ];
+
+  let curY = 730;
+  for (const [lbl, val] of particulars) {
+    schedPage.drawRectangle({ x: 48, y: curY - 4, width: 499, height: 22, color: rgb(0.96, 0.97, 0.99) });
+    schedPage.drawText(ascii(lbl), { x: 56, y: curY + 2, size: 9.5, font: bold, color: rgb(0.15, 0.2, 0.3) });
+    schedPage.drawText(ascii(String(val || '—').slice(0, 60)), { x: 230, y: curY + 2, size: 9.5, font, color: rgb(0.1, 0.1, 0.1) });
+    curY -= 26;
+  }
+
+  curY -= 26;
+  schedPage.drawText(ascii(`For ${companyName}`), { x: 48, y: curY, size: 10, font: bold, color: rgb(0.1, 0.1, 0.1) });
+  schedPage.drawText(ascii(`For ${partyName}`), { x: 330, y: curY, size: 10, font: bold, color: rgb(0.1, 0.1, 0.1) });
+  curY -= 36;
+  schedPage.drawText('___________________________________', { x: 48, y: curY, size: 10, font, color: rgb(0.5, 0.5, 0.5) });
+  schedPage.drawText('___________________________________', { x: 330, y: curY, size: 10, font, color: rgb(0.5, 0.5, 0.5) });
+  curY -= 14;
+  schedPage.drawText('Authorized Signatory', { x: 48, y: curY, size: 9, font, color: rgb(0.3, 0.3, 0.3) });
+  schedPage.drawText('Authorized Signatory / Partner', { x: 330, y: curY, size: 9, font, color: rgb(0.3, 0.3, 0.3) });
+
+  const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(dest, await doc.save());
+  return relPath(dest);
+};
+
+/**
  * Generate a filled C&F agreement PDF.
  * Prefers filling AcroForm fields on the uploaded template when present;
- * otherwise renders a complete agreement page with the blank values inserted.
+ * otherwise overlays blank fields and appends Schedule I to the uploaded template document;
+ * falls back to generating a synthetic agreement page only when no template file was uploaded or file is invalid.
  * @returns {Promise<string>} repo-relative path
  */
 export const generateCFAgreementPdf = async ({ type, fields = {}, company, templateTitle, templateFileUrl }) => {
   const v = (k, fallback = '') => String(fields[k] ?? fallback).trim();
 
-  if (templateFileUrl && (await pdfHasAcroForms(templateFileUrl))) {
-    const filled = await fillAcroFormPdf(templateFileUrl, fields);
-    // Move/copy into cf-issued for a stable issued-docs location.
-    const bytes = await fsp.readFile(path.resolve(ROOT, filled));
-    const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
-    await fsp.writeFile(dest, bytes);
-    try { await fsp.unlink(path.resolve(ROOT, filled)); } catch { /* ignore */ }
-    return relPath(dest);
+  // If a template file URL is provided, locate and fill the actual uploaded document
+  const templateAbsPath = templateFileUrl ? resolveTemplateFilePath(templateFileUrl) : null;
+
+  if (templateAbsPath) {
+    if (await pdfHasAcroForms(templateFileUrl)) {
+      try {
+        const filled = await fillAcroFormPdf(templateFileUrl, fields);
+        const filledAbs = resolveTemplateFilePath(filled) || path.resolve(ROOT, filled);
+        const bytes = await fsp.readFile(filledAbs);
+        const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
+        await fsp.writeFile(dest, bytes);
+        try { await fsp.unlink(filledAbs); } catch { /* ignore */ }
+        return relPath(dest);
+      } catch (err) {
+        console.warn('fillAcroFormPdf failed, falling back:', err?.message);
+      }
+    }
+
+    // Fill uploaded PDF template (preserves all original pages, overlays text, appends Schedule I)
+    const filledPath = await fillTemplateCFAgreementPdf({
+      templateAbsPath,
+      fields,
+      company,
+      templateTitle
+    });
+    if (filledPath) {
+      return filledPath;
+    }
   }
 
   const companyName = company?.name || 'Mirus Med Sciences Private Limited';
   const typeTitles = {
-    CFAgent: 'C & F AGENT AGREEMENT',
-    CFDistributor: 'C & F DISTRIBUTOR AGREEMENT',
-    CFWholesaler: 'C & F WHOLESALER AGREEMENT'
+    CFAgent: 'C & F AGENCY AGREEMENT'
   };
   const partyLabel = {
-    CFAgent: 'C & F Agent',
-    CFDistributor: 'C&F Distributor',
-    CFWholesaler: 'C&F Wholesaler'
-  }[type] || 'C&F Partner';
+    CFAgent: 'C & F Agency'
+  }[type] || 'C&F Agency';
 
   const title = templateTitle || typeTitles[type] || 'C & F AGREEMENT';
   const day = v('agreementDay', '____');

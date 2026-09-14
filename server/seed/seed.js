@@ -462,10 +462,8 @@ async function seedOffers(engTpl, company = null) {
 }
 
 /**
- * Seed C&F agreement templates:
+ * Seed C&F agreement template:
  * - Agent from seed/cf-examples/cf-agent.pdf (C&F new)
- * - Distributor from seed/cf-examples/cf-distributor.pdf
- * - Wholesaler as a generated sample PDF (no external source file yet)
  */
 async function seedCFTemplates() {
   fs.mkdirSync(CF_TEMPLATE_DIR, { recursive: true });
@@ -492,32 +490,10 @@ async function seedCFTemplates() {
 
   await installExample({
     type: 'CFAgent',
-    name: 'C&F Agent Agreement',
-    description: 'Standard C&F Agent appointment agreement (from C&F new).',
+    name: 'C&F Agency Agreement',
+    description: 'Standard C&F Agency appointment agreement (from C&F new).',
     sourceName: 'cf-agent.pdf',
-    originalFileName: 'C&F Agent Agreement.pdf'
-  });
-
-  await installExample({
-    type: 'CFDistributor',
-    name: 'C&F Distributor Agreement',
-    description: 'Standard C&F Distributor appointment agreement.',
-    sourceName: 'cf-distributor.pdf',
-    originalFileName: 'C&F Distributor Agreement.pdf'
-  });
-
-  // Wholesaler sample — generated placeholder until a branded PDF is supplied.
-  const wholesalerPdf = await buildWholesalerSamplePdf();
-  const wholesalerName = `${crypto.randomUUID()}.pdf`;
-  await fsp.writeFile(path.join(CF_TEMPLATE_DIR, wholesalerName), wholesalerPdf);
-  await CFTemplate.create({
-    type: 'CFWholesaler',
-    name: 'C&F Wholesaler Agreement',
-    description: 'Sample C&F Wholesaler agreement template. Replace with the official PDF when available.',
-    fileUrl: cfTemplateRelPath(wholesalerName),
-    originalFileName: 'C&F Wholesaler Agreement.pdf',
-    mimeType: 'application/pdf',
-    active: true
+    originalFileName: 'C&F Agency Agreement.pdf'
   });
 }
 
@@ -615,40 +591,6 @@ async function seedLetterTemplates() {
   }
 }
 
-async function buildWholesalerSamplePdf() {
-  const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const ink = rgb(0.18, 0.18, 0.18);
-  let y = 780;
-  const line = (text, size = 11, useBold = false, gap = 18) => {
-    page.drawText(String(text), { x: 48, y, size, font: useBold ? bold : font, color: ink });
-    y -= gap;
-  };
-  line('Mirus Med Sciences Private Limited', 16, true, 28);
-  line('C & F WHOLESALER AGREEMENT', 13, true, 28);
-  line('This agreement is entered into on this ______ day of ______ Year 20__ at ______________.');
-  line('By and between:');
-  line('Mirus Med Sciences Private Limited (the "Company")');
-  line('AND');
-  line('Mr./Mrs./Ms ________________________________ (the "C&F Wholesaler").', 11, false, 24);
-  line('1. Appointment & Territory', 12, true);
-  line('The Company appoints the C&F Wholesaler for sale of Products in the territory of __________.');
-  line('2. Duration', 12, true);
-  line('This Agreement is effective for one year and may be renewed by mutual written agreement.');
-  line('3. Supply & Payment', 12, true);
-  line('Products supplied FOR to the Wholesaler godown. Margin ____ %. Payment: advance / as agreed.');
-  line('4. Licenses', 12, true);
-  line('The Wholesaler shall maintain valid drug wholesale licenses (Form 20B / 21B) throughout.');
-  line('5. General', 12, true, 22);
-  line('This sample template may be replaced under Setup Templates -> C&F Templates.');
-  y -= 40;
-  line('For the Company                          For the C&F Wholesaler', 10, false, 40);
-  line('______________________                  ______________________', 10, false, 16);
-  line('Authorized Signatory                     Authorized Signatory', 9);
-  return Buffer.from(await doc.save());
-}
 
 run().catch(async (err) => {
   console.error('❌ Seed failed:', err);
