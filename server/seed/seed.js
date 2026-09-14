@@ -580,7 +580,7 @@ async function seedLetterTemplates() {
     let originalFileName = `${d.name}.pdf`;
 
     if (d.type === 'FNFLetter') {
-      const fnfRel = copySeedAssetToUploads('FNF_Settlement_Letter_Template.pdf', 'letter-templates', 'FNF_Settlement_Letter_Template.pdf');
+      const fnfRel = copySeedAssetToUploads('FNF_Settlement_Letter_Template.pdf', 'letter-templates/FNFLetter', 'FNF_Settlement_Letter_Template.pdf');
       if (fnfRel) {
         fileUrl = fnfRel;
         originalFileName = 'FNF_Settlement_Letter_Template.pdf';
@@ -597,9 +597,11 @@ async function seedLetterTemplates() {
       page.drawText(d.title, { x: 48, y: 750, size: 12, font: bold });
       page.drawText('Upload a fillable letterhead PDF to replace this sample.', { x: 48, y: 720, size: 10, font });
       const bytes = await doc.save();
-      const filename = `${crypto.randomUUID()}.pdf`;
-      await fsp.writeFile(path.join(LETTER_TEMPLATE_DIR, filename), bytes);
-      fileUrl = letterTemplateRelPath(filename);
+      const typeDir = path.resolve(LETTER_TEMPLATE_DIR, d.type);
+      await fsp.mkdir(typeDir, { recursive: true });
+      const filename = `${d.type}-${d.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').slice(0, 40) || 'template'}-${crypto.randomUUID()}.pdf`;
+      await fsp.writeFile(path.join(typeDir, filename), bytes);
+      fileUrl = letterTemplateRelPath(d.type, filename);
     }
 
     await LetterTemplate.create({

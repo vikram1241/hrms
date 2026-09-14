@@ -131,7 +131,7 @@ export default function LetterTemplatesSection() {
     }
   };
 
-  const shownPlaceholders = isAppointment && form.detectedPlaceholders?.length
+  const shownPlaceholders = form?.detectedPlaceholders?.length
     ? form.detectedPlaceholders
     : placeholders;
 
@@ -140,7 +140,7 @@ export default function LetterTemplatesSection() {
       <p className="mb-4 text-sm text-muted">
         Upload a default letterhead PDF per letter type. Configure the email subject and body with placeholders —
         they are filled when you generate a letter, and the PDF is attached. Mark one template as default per type.
-        For Appointment Letters, uploading a PDF with {'{{placeholders}}'} (or AcroForm fields) updates the letter body used at generation.
+        Uploading a PDF with {'{{placeholders}}'} or AcroForm fields automatically detects the values used at generation and pre-fills employee details.
       </p>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -298,7 +298,7 @@ export default function LetterTemplatesSection() {
 
             <div className="rounded-lg bg-surface p-2 text-xs text-muted">
               <span className="font-medium text-ink">
-                {isAppointment && form.detectedPlaceholders?.length ? 'Detected placeholders:' : 'Placeholders:'}
+                {form.detectedPlaceholders?.length ? 'Detected placeholders:' : 'Placeholders:'}
               </span>{' '}
               {shownPlaceholders.map((p) => `{{${p}}}`).join('  ') || '—'}
             </div>

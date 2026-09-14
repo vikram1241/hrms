@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
@@ -14,6 +14,7 @@ import TablePager from '../../components/ui/TablePager.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import useClientPager from '../../hooks/useClientPager.js';
 import { listExits, initiateExit, updateExit, generateExitLetters, deleteExit, downloadFNFLetter } from '../../api/exits.js';
+import { listUsers } from '../../api/users.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -32,6 +33,7 @@ const userEmpId = (u) => {
 export default function ExitsPage() {
   const dispatch = useDispatch();
   const exits = useAsync(() => listExits(), []);
+  const users = useAsync(() => listUsers({ limit: 500, employeesOnly: 'true' }), []);
   const pager = useClientPager(exits.data || [], 10);
   const existingExitUserIds = (exits.data || [])
     .map((r) => (typeof r.userId === 'object' && r.userId?._id ? r.userId._id : r.userId))
@@ -45,6 +47,39 @@ export default function ExitsPage() {
   const [sendingMailId, setSendingMailId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
 
+  const employeeMap = useMemo(() => {
+    const map = new Map();
+    for (const u of users.data?.data || []) {
+      map.set(String(u._id), u);
+    }
+    return map;
+  }, [users.data]);
+
+  const issuedFnfRows = useMemo(() => {
+    return (exits.data || [])
+      .filter((r) => r.fnfLetterUrl || r.fnfSettlement?.status === 'Settled')
+      .map((r) => {
+        const uId = typeof r.userId === 'object' && r.userId?._id ? r.userId._id : r.userId;
+        const user = employeeMap.get(String(uId)) || (typeof r.userId === 'object' ? r.userId : null);
+        const fullName = user ? `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim() || user.email : 'Employee';
+        const amount = Number(r.fnfSettlement?.amount ?? 0) || 0;
+        const issuedAt = r.fnfSettlement?.settledAt || r.updatedAt || r.createdAt || r.lastWorkingDay;
+        return {
+          _id: r._id,
+          employeeName: fullName,
+          email: user?.email || '—',
+          employeeId: user?.employeeDetails?.employeeId || '—',
+          designation: user?.employeeDetails?.designation || '—',
+          amount,
+          issuedAt,
+          fnfLetterUrl: r.fnfLetterUrl
+        };
+      })
+      .sort((a, b) => new Date(b.issuedAt || 0).getTime() - new Date(a.issuedAt || 0).getTime());
+  }, [employeeMap, exits.data]);
+
+  const issuedFNF = useClientPager(issuedFnfRows, 5);
+
   const create = async (e) => {
     e.preventDefault();
     if (!form.userId) return dispatch(notifyError('Select an employee.'));
@@ -53,6 +88,7 @@ export default function ExitsPage() {
     catch (err) { dispatch(notifyError(err.uiMessage)); }
     finally { setBusy(false); }
   };
+
   const handleSendMail = async (r) => {
     setSendingMailId(r._id);
     try {
@@ -65,6 +101,7 @@ export default function ExitsPage() {
       setSendingMailId(null);
     }
   };
+
   const handleDownload = async (record) => {
     setDownloadingId(record._id);
     try {
@@ -176,6 +213,65 @@ export default function ExitsPage() {
           onPageChange={pager.setPage}
           onLimitChange={pager.setLimit}
         />
+      </CardBody></Card>
+
+      <Card className="mt-6"><CardBody>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-ink">Issued F&amp;F settlements</h3>
+            <p className="text-sm text-muted">Latest settlement letters first, with employee details and issue dates.</p>
+          </div>
+        </div>
+
+        {issuedFNF.total ? (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[780px] text-sm">
+                <thead>
+                  <tr className="text-left text-muted">
+                    <th className="pb-2">Employee</th>
+                    <th className="pb-2">Employee ID</th>
+                    <th className="pb-2">Designation</th>
+                    <th className="pb-2">Email</th>
+                    <th className="pb-2">Issued date</th>
+                    <th className="pb-2">Amount</th>
+                    <th className="pb-2">PDF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {issuedFNF.pageRows.map((row) => (
+                    <tr key={row._id} className="border-t border-line align-top">
+                      <td className="py-2">
+                        <div className="font-medium text-ink">{row.employeeName}</div>
+                      </td>
+                      <td className="py-2">{row.employeeId}</td>
+                      <td className="py-2">{row.designation}</td>
+                      <td className="py-2">{row.email}</td>
+                      <td className="py-2">{fmt(row.issuedAt)}</td>
+                      <td className="py-2">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format((row.amount || 0) / 100)}</td>
+                      <td className="py-2">
+                        {row.fnfLetterUrl ? (
+                          <a href={row.fnfLetterUrl} target="_blank" rel="noreferrer" className="text-primary-600 underline">View</a>
+                        ) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <TablePager
+              page={issuedFNF.page}
+              pages={issuedFNF.pages}
+              total={issuedFNF.total}
+              limit={issuedFNF.limit}
+              showingCount={issuedFNF.pageRows.length}
+              onPageChange={issuedFNF.setPage}
+              onLimitChange={issuedFNF.setLimit}
+            />
+          </>
+        ) : (
+          <div className="py-8 text-center text-sm text-muted">No issued F&amp;F settlement letters yet.</div>
+        )}
       </CardBody></Card>
 
       <FormDialog open={createOpen} onClose={() => setCreateOpen(false)} title="Initiate exit" onSubmit={create} loading={busy} submitLabel="Initiate">

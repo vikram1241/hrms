@@ -11,11 +11,33 @@ const ALLOWED_MIME = new Map([
   ['application/pdf', '.pdf']
 ]);
 
+export const letterTemplateFolderFor = (type = 'General') => {
+  const safeType = String(type || 'General').trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'General';
+  const dir = path.resolve(LETTER_TEMPLATE_DIR, safeType);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+};
+
+export const letterTemplateRelPath = (type, filename) => {
+  const safeType = String(type || 'General').trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'General';
+  return `uploads/letter-templates/${safeType}/${filename}`;
+};
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, LETTER_TEMPLATE_DIR),
+  destination: (req, file, cb) => {
+    const type = req.body?.type || 'General';
+    cb(null, letterTemplateFolderFor(type));
+  },
   filename: (req, file, cb) => {
+    const type = String(req.body?.type || 'General').trim() || 'General';
+    const safeName = String(file.originalname || 'template')
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40) || 'template';
     const ext = ALLOWED_MIME.get(file.mimetype) || path.extname(file.originalname).toLowerCase() || '.pdf';
-    cb(null, `${crypto.randomUUID()}${ext}`);
+    cb(null, `${type}-${safeName}-${crypto.randomUUID()}${ext}`);
   }
 });
 
@@ -31,5 +53,3 @@ export const uploadLetterTemplateFile = multer({
   fileFilter,
   limits: { fileSize: 15 * 1024 * 1024, files: 1 }
 }).single('file');
-
-export const letterTemplateRelPath = (filename) => `uploads/letter-templates/${filename}`;
