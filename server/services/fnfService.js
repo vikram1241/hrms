@@ -17,20 +17,25 @@ export const generateAndEmailFNF = async ({ record, user, company, actor } = {})
 
   const name = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim();
   const lwd = new Date(record.lastWorkingDay).toDateString();
+  const resDate = record.resignationDate ? new Date(record.resignationDate).toDateString() : '';
   const amountPaisa = Number(record?.fnfSettlement?.amount ?? 0) || 0;
   const fields = {
     employeeName: name,
     employeeId: user.employeeDetails?.employeeId || '',
+    department: user.employeeDetails?.department || '',
+    Department: user.employeeDetails?.department || '',
     designation: user.employeeDetails?.designation || 'Employee',
     companyName: company?.name || 'Company',
     amount: formatINR(amountPaisa),
     Amount: formatINR(amountPaisa),
     reason: record?.reason || 'Resignation',
     Reason: record?.reason || 'Resignation',
+    resignationDate: resDate,
+    ResignationDate: resDate,
     lastWorkingDay: lwd,
-    date: record.lastWorkingDay
+    date: lwd,
+    Date: lwd
   };
-
   const pdf = await generateLetterFromTemplate({ template: tpl, fields, company });
   const absPdf = path.resolve(process.cwd(), pdf);
 

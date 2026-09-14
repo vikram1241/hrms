@@ -18,7 +18,11 @@ export const initiateExit = asyncHandler(async (req, res) => {
   const user = await User.findById(userId);
   if (!user) throw new ApiError(404, 'Employee not found');
 
+  const existing = await ExitRecord.findOne({ userId, status: { $in: ['Initiated', 'InProgress'] } });
+  if (existing) throw new ApiError(400, 'An exit has already been initiated for this employee');
+
   const record = await ExitRecord.create({ userId, resignationDate, lastWorkingDay, reason, status: 'Initiated' });
+  await record.populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId');
   await logActivity({
     actor: req.user,
     action: 'exit.initiate',
@@ -33,14 +37,18 @@ export const initiateExit = asyncHandler(async (req, res) => {
 export const listExits = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
-  const data = await ExitRecord.find(filter).sort({ createdAt: -1 }).limit(500);
+  const data = await ExitRecord.find(filter)
+    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId')
+    .sort({ createdAt: -1 })
+    .limit(500);
   res.status(200).json({ success: true, data });
 });
 
 /** GET /api/exits/:id */
 export const getExit = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid id');
-  const record = await ExitRecord.findById(req.params.id);
+  const record = await ExitRecord.findById(req.params.id)
+    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId');
   if (!record) throw new ApiError(404, 'Exit record not found');
   res.status(200).json({ success: true, record });
 });

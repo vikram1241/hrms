@@ -18,11 +18,24 @@ import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const userDisplayName = (u) => {
+  if (!u || typeof u !== 'object') return '—';
+  const p = u.personalDetails;
+  const n = p ? `${p.firstName || ''} ${p.lastName || ''}`.trim() : '';
+  return n || u.email || '—';
+};
+const userEmpId = (u) => {
+  if (!u || typeof u !== 'object') return '—';
+  return u.employeeDetails?.employeeId || '—';
+};
 
 export default function ExitsPage() {
   const dispatch = useDispatch();
   const exits = useAsync(() => listExits(), []);
   const pager = useClientPager(exits.data || [], 10);
+  const existingExitUserIds = (exits.data || [])
+    .map((r) => (typeof r.userId === 'object' && r.userId?._id ? r.userId._id : r.userId))
+    .filter(Boolean);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ userId: '', resignationDate: today(), lastWorkingDay: today(), reason: '' });
   const [busy, setBusy] = useState(false);
@@ -77,17 +90,29 @@ export default function ExitsPage() {
 
       <Card><CardBody>
         <table className="w-full text-sm">
-          <thead><tr className="text-left text-muted"><th className="pb-2">Resigned</th><th className="pb-2">Last day</th><th className="pb-2">F&amp;F</th><th className="pb-2">Status</th><th className="pb-2 text-right">Actions</th></tr></thead>
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="pb-2">Employee</th>
+              <th className="pb-2">Emp ID</th>
+              <th className="pb-2">Resigned</th>
+              <th className="pb-2">Last day</th>
+              <th className="pb-2">F&amp;F</th>
+              <th className="pb-2">Status</th>
+              <th className="pb-2 text-right">Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {pager.pageRows.map((r) => (
               <tr key={r._id} className="border-t border-line">
+                <td className="py-2 font-medium text-ink">{userDisplayName(r.userId)}</td>
+                <td className="py-2 font-mono text-xs text-muted">{userEmpId(r.userId)}</td>
                 <td className="py-2">{fmt(r.resignationDate)}</td>
                 <td className="py-2">{fmt(r.lastWorkingDay)}</td>
                 <td className="py-2"><StatusBadge status={r.fnfSettlement?.status === 'Settled' ? 'paid' : 'pending'} label={r.fnfSettlement?.status || 'Pending'} /></td>
                 <td className="py-2"><StatusBadge status={r.status === 'Completed' ? 'active' : 'processing'} label={r.status} /></td>
                 <td className="py-2">
                   <div className="flex justify-end gap-1">
-                    <Button size="sm" variant="secondary" onClick={() => setEdit({ _id: r._id, status: r.status, interviewNotes: r.exitInterview?.notes || '', fnfRupees: r.fnfSettlement?.amount ? r.fnfSettlement.amount / 100 : '', fnfStatus: r.fnfSettlement?.status || 'Pending' })}>Manage</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setEdit({ _id: r._id, employeeName: userDisplayName(r.userId), status: r.status, interviewNotes: r.exitInterview?.notes || '', fnfRupees: r.fnfSettlement?.amount ? r.fnfSettlement.amount / 100 : '', fnfStatus: r.fnfSettlement?.status || 'Pending' })}>Manage</Button>
                     <Button size="sm" onClick={() => letters(r)}><FileDown size={14} /> Letters</Button>
                     {r.status === 'Initiated' && !r.relievingLetterUrl && !r.experienceLetterUrl && (
                       <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget(r)} aria-label="Delete exit">
@@ -98,7 +123,7 @@ export default function ExitsPage() {
                 </td>
               </tr>
             ))}
-            {!pager.total && <tr><td colSpan={5} className="py-8 text-center text-muted"><LogOut className="mx-auto mb-2 text-slate-300" /> No exits in progress.</td></tr>}
+            {!pager.total && <tr><td colSpan={7} className="py-8 text-center text-muted"><LogOut className="mx-auto mb-2 text-slate-300" /> No exits in progress.</td></tr>}
           </tbody>
         </table>
         <TablePager
@@ -111,7 +136,7 @@ export default function ExitsPage() {
 
       <FormDialog open={createOpen} onClose={() => setCreateOpen(false)} title="Initiate exit" onSubmit={create} loading={busy} submitLabel="Initiate">
         <div className="space-y-3 py-1">
-          <EmployeeSelect value={form.userId} onChange={(v) => setForm({ ...form, userId: v })} />
+          <EmployeeSelect value={form.userId} onChange={(v) => setForm({ ...form, userId: v })} excludeIds={existingExitUserIds} />
           <div className="grid grid-cols-2 gap-3">
             <TextField type="date" size="small" label="Resignation date" InputLabelProps={{ shrink: true }} value={form.resignationDate} onChange={(e) => setForm({ ...form, resignationDate: e.target.value })} />
             <TextField type="date" size="small" label="Last working day" InputLabelProps={{ shrink: true }} value={form.lastWorkingDay} onChange={(e) => setForm({ ...form, lastWorkingDay: e.target.value })} />
@@ -120,7 +145,7 @@ export default function ExitsPage() {
         </div>
       </FormDialog>
 
-      <FormDialog open={Boolean(edit)} onClose={() => setEdit(null)} title="Manage exit" onSubmit={saveEdit} loading={busy} submitLabel="Save">
+      <FormDialog open={Boolean(edit)} onClose={() => setEdit(null)} title={edit?.employeeName ? `Manage exit — ${edit.employeeName}` : 'Manage exit'} onSubmit={saveEdit} loading={busy} submitLabel="Save">
         {edit && (
           <div className="space-y-3 py-1">
             <TextField select size="small" fullWidth label="Status" value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}>

@@ -191,6 +191,7 @@ const run = async () => {
   console.log('   Admin:      mirus / admin@mirus.com / Admin@123');
   console.log(`   HR:         mirus / priya.hr@mirus.com / ${DEMO_PASSWORD}`);
   console.log(`   Employee:   mirus / rahul.kumar@mirus.com / ${DEMO_PASSWORD}`);
+  console.log(`   Employee:   mirus / freelancer.nenu@gmail.com / ${DEMO_PASSWORD}`);
   console.log('   Superadmin: _platform / super@platform.local / ChangeMe!123');
   if (summary._offerLink) {
     console.log('--------------------------------------------------------');
@@ -221,10 +222,11 @@ async function seedCompany(company) {
 
   // --- Employees ---
   const employeesSpec = [
-    { email: 'rahul.kumar@mirus.com', first: 'Rahul', last: 'Kumar', empId: 'MMS45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true },
-    { email: 'amit.patel@mirus.com', first: 'Amit', last: 'Patel', empId: 'MMS45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation' },
-    { email: 'neha.gupta@mirus.com', first: 'Neha', last: 'Gupta', empId: 'MMS45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent' },
-    { email: 'sunny.deol@mirus.com', first: 'Sunny', last: 'Deol', empId: 'MMS45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true }
+    { email: 'rahul.kumar@mirus.com', first: 'Rahul', last: 'Kumar', empId: 'MMS45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true, gender: 'Male' },
+    { email: 'amit.patel@mirus.com', first: 'Amit', last: 'Patel', empId: 'MMS45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation', gender: 'Male' },
+    { email: 'neha.gupta@mirus.com', first: 'Neha', last: 'Gupta', empId: 'MMS45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent', gender: 'Female' },
+    { email: 'sunny.deol@mirus.com', first: 'Sunny', last: 'Deol', empId: 'MMS45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true, gender: 'Male' },
+    { email: 'freelancer.nenu@gmail.com', first: 'Ananya', last: 'Sharma', empId: 'MMS45875', designation: 'Frontend Engineer', department: 'Engineering', ctc: 1000000, tpl: engTpl, type: 'Permanent', gender: 'Female' }
   ];
 
   const employees = [];
@@ -232,7 +234,7 @@ async function seedCompany(company) {
   for (const spec of employeesSpec) {
     const user = await User.create({
       email: spec.email, password: DEMO_PASSWORD, role: 'employee', isActive: true, onboardingStage: 'completed',
-      personalDetails: { firstName: spec.first, lastName: spec.last, dateOfBirth: new Date('1993-09-20'), gender: 'Male', maritalStatus: 'Single', passportPhotoUrl: null },
+      personalDetails: { firstName: spec.first, lastName: spec.last, dateOfBirth: new Date('1993-09-20'), gender: spec.gender || 'Male', maritalStatus: 'Single', passportPhotoUrl: null },
       contactInfo: baseContact(),
       familyDetails: [{ name: `${spec.first} Sr.`, relationship: 'Father', dependent: true }],
       educationHistory: [
@@ -573,7 +575,7 @@ async function buildWholesalerSamplePdf() {
   line('4. Licenses', 12, true);
   line('The Wholesaler shall maintain valid drug wholesale licenses (Form 20B / 21B) throughout.');
   line('5. General', 12, true, 22);
-  line('This sample template may be replaced under Setup Templates → C&F Templates.');
+  line('This sample template may be replaced under Setup Templates -> C&F Templates.');
   y -= 40;
   line('For the Company                          For the C&F Wholesaler', 10, false, 40);
   line('______________________                  ______________________', 10, false, 16);
