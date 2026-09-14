@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import mongoose from 'mongoose';
 import ExitRecord from '../models/ExitRecord.js';
 import User from '../models/User.js';
@@ -131,6 +133,45 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
     experienceLetterUrl: record.experienceLetterUrl
   });
 });
+
+/**
+ * GET /api/exits/:id/fnf — stream/download FNF letter.
+ * Generates the letter on demand if not yet generated.
+ */
+export const downloadFNFLetter = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) throw new ApiError(400, 'Invalid exit id');
+
+  const record = await ExitRecord.findById(id);
+  if (!record) throw new ApiError(404, 'Exit record not found');
+  const user = await User.findById(record.userId);
+  if (!user) throw new ApiError(404, 'Employee not found');
+  const company = await Company.findById(req.user.companyId || user.companyId);
+
+  const name = fullName(user) || 'Employee';
+  const safeName = (name.replace(/[^a-zA-Z0-9_-]/g, '_') || 'Employee').trim();
+  const downloadFileName = `${safeName}_FNF_Settlement.pdf`;
+
+  // Always re-generate FNF PDF on download to reflect latest template, branding, and fixes
+  const fnfPdf = await fnfService.generateFNFPdf({ record, user, company });
+  if (fnfPdf) {
+    record.fnfLetterUrl = fnfPdf;
+    await record.save();
+  }
+
+  if (!record.fnfLetterUrl) {
+    throw new ApiError(404, 'No active FNF letter template found. Please configure one under Letter Templates.');
+  }
+
+  const abs = path.resolve(process.cwd(), record.fnfLetterUrl);
+  if (!fs.existsSync(abs)) throw new ApiError(404, 'FNF PDF file missing on disk');
+
+  const disposition = req.query.download === 'false' ? 'inline' : 'attachment';
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${disposition}; filename="${downloadFileName}"`);
+  fs.createReadStream(abs).pipe(res);
+});
+
 
 /** DELETE /api/exits/:id — only when Initiated and no letters issued. */
 export const deleteExit = asyncHandler(async (req, res) => {

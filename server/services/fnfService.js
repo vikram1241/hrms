@@ -7,6 +7,44 @@ import { formatINR } from '../utils/money.js';
 import { sendAppointmentLetter } from './emailService.js';
 import { queueMailJob } from './mailQueue.js';
 
+export const buildFNFFields = ({ record, user, company } = {}) => {
+  const name = `${user?.personalDetails?.firstName || ''} ${user?.personalDetails?.lastName || ''}`.trim();
+  const lwd = record?.lastWorkingDay ? new Date(record.lastWorkingDay).toDateString() : '';
+  const resDate = record?.resignationDate ? new Date(record.resignationDate).toDateString() : '';
+  const amountPaisa = Number(record?.fnfSettlement?.amount ?? 0) || 0;
+  return {
+    employeeName: name,
+    employeeId: user?.employeeDetails?.employeeId || '',
+    department: user?.employeeDetails?.department || '',
+    Department: user?.employeeDetails?.department || '',
+    designation: user?.employeeDetails?.designation || 'Employee',
+    companyName: company?.name || 'Company',
+    amount: formatINR(amountPaisa),
+    Amount: formatINR(amountPaisa),
+    reason: record?.reason || 'Resignation',
+    Reason: record?.reason || 'Resignation',
+    resignationDate: resDate,
+    ResignationDate: resDate,
+    resignation_date: resDate,
+    resignedDate: resDate,
+    lastWorkingDay: lwd,
+    LastWorkingDay: lwd,
+    date: lwd,
+    Date: lwd
+  };
+};
+
+/**
+ * Generate an FNFLetter (if a default template exists) without emailing.
+ * Returns the generated PDF relative path when created, otherwise null.
+ */
+export const generateFNFPdf = async ({ record, user, company } = {}) => {
+  const tpl = await resolveDefaultLetterTemplate('FNFLetter');
+  if (!tpl) return null;
+  const fields = buildFNFFields({ record, user, company });
+  return generateLetterFromTemplate({ template: tpl, fields, company });
+};
+
 /**
  * Generate an FNFLetter (if a default template exists) and email it to the
  * employee. Returns the generated PDF relative path when created, otherwise null.
@@ -16,26 +54,7 @@ export const generateAndEmailFNF = async ({ record, user, company, actor } = {})
   if (!tpl) return null;
 
   const name = `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim();
-  const lwd = new Date(record.lastWorkingDay).toDateString();
-  const resDate = record.resignationDate ? new Date(record.resignationDate).toDateString() : '';
-  const amountPaisa = Number(record?.fnfSettlement?.amount ?? 0) || 0;
-  const fields = {
-    employeeName: name,
-    employeeId: user.employeeDetails?.employeeId || '',
-    department: user.employeeDetails?.department || '',
-    Department: user.employeeDetails?.department || '',
-    designation: user.employeeDetails?.designation || 'Employee',
-    companyName: company?.name || 'Company',
-    amount: formatINR(amountPaisa),
-    Amount: formatINR(amountPaisa),
-    reason: record?.reason || 'Resignation',
-    Reason: record?.reason || 'Resignation',
-    resignationDate: resDate,
-    ResignationDate: resDate,
-    lastWorkingDay: lwd,
-    date: lwd,
-    Date: lwd
-  };
+  const fields = buildFNFFields({ record, user, company });
   const pdf = await generateLetterFromTemplate({ template: tpl, fields, company });
   const absPdf = path.resolve(process.cwd(), pdf);
 
@@ -50,4 +69,4 @@ export const generateAndEmailFNF = async ({ record, user, company, actor } = {})
   return pdf;
 };
 
-export default { generateAndEmailFNF };
+export default { generateFNFPdf, generateAndEmailFNF, buildFNFFields };

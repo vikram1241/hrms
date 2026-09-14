@@ -48,6 +48,8 @@ const resolveAssetPath = (relMaybe) => {
   if (!relMaybe) return null;
   const candidates = [
     path.resolve(ROOT, relMaybe),
+    path.resolve(ROOT, 'data', relMaybe),
+    path.resolve(ROOT, '..', 'data', relMaybe),
     path.resolve(relMaybe),
     path.resolve('/app', relMaybe)
   ];
@@ -1554,38 +1556,96 @@ export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENER
   const sourceAbs = path.resolve(ROOT, sourceRelPath);
   if (!fs.existsSync(sourceAbs)) throw new ApiError(404, 'Source PDF not found');
 
-  const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
+  const bytes = await fsp.readFile(sourceAbs);
+  const doc = await PDFDocument.load(bytes);
   const pages = doc.getPages();
   const page = pages[pages.length - 1];
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const black = rgb(0.1, 0.1, 0.1);
 
-  const logoWithStamp = await loadImage(doc, company?.branding?.logoWithStampUrl);
-  const stamp = await loadImage(doc, company?.branding?.stampUrl);
-  if (logoWithStamp) {
-    const d = logoWithStamp.scaleToFit(110, 110);
-    page.drawImage(logoWithStamp, { x: 410, y: 70, width: d.width, height: d.height, opacity: 0.95 });
-  } else if (stamp) {
-    const d = stamp.scaleToFit(100, 100);
-    page.drawImage(stamp, { x: 420, y: 80, width: d.width, height: d.height, opacity: 0.9 });
+  // Locate the closing / sign-off block in the template text layer.
+  let signOffX = 40;
+  let signOffLowestY = null;
+  let hasAuthorizedSignatoryText = false;
+
+  try {
+    const { getDocumentProxy } = await import('unpdf');
+    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const textPage = await pdf.getPage(pages.length);
+    const content = await textPage.getTextContent();
+    for (const item of content.items || []) {
+      const s = String(item.str || '').trim();
+      if (!s) continue;
+      const x = Number(item.transform?.[4]) || 0;
+      const y = Number(item.transform?.[5]) || 0;
+      // Skip running headers (>600) and footers (<70)
+      if (y < 70 || y > 600) continue;
+
+      if (/authorized\s+signatory/i.test(s)) {
+        hasAuthorizedSignatoryText = true;
+        signOffX = x || signOffX;
+        signOffLowestY = signOffLowestY === null ? y : Math.min(signOffLowestY, y);
+      } else if (/^(yours\s+(sincerely|faithfully|truly)|human\s+resources|hr\s+department|for\s+)/i.test(s)) {
+        signOffX = x || signOffX;
+        signOffLowestY = signOffLowestY === null ? y : Math.min(signOffLowestY, y);
+      }
+    }
+  } catch {
+    /* fallback to defaults */
   }
-  const sig = await loadImage(doc, company?.branding?.signatureUrl);
+
+  const [sig, logoWithStamp, stamp] = await Promise.all([
+    loadImage(doc, company?.branding?.signatureUrl),
+    loadImage(doc, company?.branding?.logoWithStampUrl),
+    loadImage(doc, company?.branding?.stampUrl)
+  ]);
+  const seal = logoWithStamp || stamp;
+
+  // Position signature and stamp together at the sign-off block (side-by-side under the closing section)
+  const marginX = Math.max(20, signOffX);
+  let sigD = null;
+  let sigX = marginX;
+  let sigY = signOffLowestY !== null ? Math.max(65, signOffLowestY - 50) : 110;
+
   if (sig) {
-    const d = sig.scaleToFit(150, 50);
-    page.drawImage(sig, { x: 40, y: 110, width: d.width, height: d.height });
+    sigD = sig.scaleToFit(130, 44);
+    sigY = signOffLowestY !== null ? Math.max(65, signOffLowestY - sigD.height - 8) : 110;
+    page.drawImage(sig, {
+      x: sigX,
+      y: sigY,
+      width: sigD.width,
+      height: sigD.height
+    });
   }
-  if (company?.branding?.authorizedSignatoryName || sig || stamp || logoWithStamp) {
-    page.drawLine({ start: { x: 40, y: 105 }, end: { x: 220, y: 105 }, thickness: 1, color: black });
+
+  if (seal) {
+    const sealD = seal.scaleToFit(85, 85);
+    const sealX = sigD ? sigX + sigD.width + 16 : marginX;
+    const sealY = signOffLowestY !== null ? Math.max(60, signOffLowestY - sealD.height - 4) : 85;
+    page.drawImage(seal, {
+      x: sealX,
+      y: sealY,
+      width: sealD.width,
+      height: sealD.height,
+      opacity: 0.95
+    });
+  }
+
+  // Only draw "Authorized Signatory" line and text if the template does NOT already have it
+  if (!hasAuthorizedSignatoryText && (company?.branding?.authorizedSignatoryName || sig || seal)) {
+    const lineY = sigY - 6;
+    page.drawLine({ start: { x: marginX, y: lineY }, end: { x: marginX + 160, y: lineY }, thickness: 1, color: black });
     page.drawText(ascii(`Authorized Signatory: ${company?.branding?.authorizedSignatoryName || ''}`), {
-      x: 40, y: 90, size: 9, font, color: black
+      x: marginX, y: lineY - 14, size: 9, font, color: black
     });
     if (company?.branding?.authorizedSignatoryDesignation) {
       page.drawText(ascii(company.branding.authorizedSignatoryDesignation), {
-        x: 40, y: 76, size: 8, font, color: rgb(0.3, 0.3, 0.3)
+        x: marginX, y: lineY - 26, size: 8, font, color: rgb(0.3, 0.3, 0.3)
       });
     }
   }
 
+  fs.mkdirSync(destDir, { recursive: true });
   const file = path.join(destDir, `sealed-${crypto.randomUUID()}.pdf`);
   await fsp.writeFile(file, await doc.save());
   return relPath(file);
@@ -1927,6 +1987,8 @@ export const fillTextPlaceholderPdf = async (
     return lines.length ? lines : [[{ text: '', bold: false }]];
   };
 
+  const plannedRuns = [];
+
   for (const run of runs) {
     const page = pages[run.pageIndex];
     if (!page) continue;
@@ -1958,29 +2020,59 @@ export const fillTextPlaceholderPdf = async (
       ? Math.max(rightMargin, rightEdge - firstW)
       : run.x;
 
-    // Cover the whole original run once — avoids mid-word white gaps.
-    page.drawRectangle({
-      x: Math.min(run.x, startX) - 1,
-      y: run.y - size * 0.28 - (lines.length - 1) * lineGap,
-      width: Math.max(widest, run.width) + 6,
-      height: lineGap * lines.length + size * 0.2,
+    // Font cap-height ~0.73, descent ~0.22 -> total single-line height ~0.95 * size.
+    // White box covers strictly from bottom line's descent to top line's cap-height,
+    // so it NEVER bleeds into the line above.
+    const descent = size * 0.22;
+    const capHeight = size * 0.73;
+    const boxHeight = (lines.length - 1) * lineGap + (capHeight + descent);
+    const boxY = run.y - descent - (lines.length - 1) * lineGap;
+    const boxX = Math.min(run.x, startX) - 1;
+    const boxWidth = Math.max(widest, run.width) + 4;
+
+    plannedRuns.push({
+      page,
+      run,
+      lines,
+      size,
+      lineGap,
+      startX,
+      looksRightAligned,
+      rightEdge,
+      boxX,
+      boxY,
+      boxWidth,
+      boxHeight
+    });
+  }
+
+  // Pass 1: Draw all white background boxes so none can occlude text drawn in Pass 2
+  for (const item of plannedRuns) {
+    item.page.drawRectangle({
+      x: item.boxX,
+      y: item.boxY,
+      width: item.boxWidth,
+      height: item.boxHeight,
       color: white,
       borderWidth: 0
     });
+  }
 
-    let y = run.y;
-    for (const line of lines) {
-      let x = looksRightAligned
-        ? Math.max(rightMargin, rightEdge - measure(line, size))
-        : startX;
+  // Pass 2: Draw all text on top of the clean white boxes
+  for (const item of plannedRuns) {
+    let y = item.run.y;
+    for (const line of item.lines) {
+      let x = item.looksRightAligned
+        ? Math.max(rightMargin, item.rightEdge - measure(line, item.size))
+        : item.startX;
       for (const seg of line) {
         const t = ascii(seg.text);
         if (!t) continue;
         const f = seg.bold ? bold : font;
-        page.drawText(t, { x, y, size, font: f, color: ink });
-        x += f.widthOfTextAtSize(t, size);
+        item.page.drawText(t, { x, y, size: item.size, font: f, color: ink });
+        x += f.widthOfTextAtSize(t, item.size);
       }
-      y -= lineGap;
+      y -= item.lineGap;
     }
   }
 

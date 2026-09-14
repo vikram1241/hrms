@@ -6,3 +6,7 @@ export const initiateExit = (body) => api.post('/exits', body).then((r) => r.dat
 export const updateExit = (id, body) => api.patch(`/exits/${id}`, body).then((r) => r.data.record);
 export const generateExitLetters = (id) => api.post(`/exits/${id}/letters`).then((r) => r.data);
 export const deleteExit = (id) => api.delete(`/exits/${id}`).then((r) => r.data);
+export const downloadFNFLetter = (id) =>
+  api.get(`/exits/${id}/fnf`, { responseType: 'blob' });
+export const fnfLetterUrl = (id) => `/api/exits/${id}/fnf`;
+

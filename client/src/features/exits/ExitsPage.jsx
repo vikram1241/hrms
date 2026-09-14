@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { Plus, FileDown, LogOut, Trash2 } from 'lucide-react';
+import { Plus, Mail, Download, LogOut, Trash2 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -13,7 +13,7 @@ import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
 import TablePager from '../../components/ui/TablePager.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import useClientPager from '../../hooks/useClientPager.js';
-import { listExits, initiateExit, updateExit, generateExitLetters, deleteExit } from '../../api/exits.js';
+import { listExits, initiateExit, updateExit, generateExitLetters, deleteExit, downloadFNFLetter } from '../../api/exits.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -42,6 +42,8 @@ export default function ExitsPage() {
   const [edit, setEdit] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [sendingMailId, setSendingMailId] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   const create = async (e) => {
     e.preventDefault();
@@ -51,9 +53,50 @@ export default function ExitsPage() {
     catch (err) { dispatch(notifyError(err.uiMessage)); }
     finally { setBusy(false); }
   };
-  const letters = async (r) => {
-    try { await generateExitLetters(r._id); dispatch(notifySuccess('Relieving & experience letters generated.')); exits.reload(); }
-    catch (err) { dispatch(notifyError(err.uiMessage)); }
+  const handleSendMail = async (r) => {
+    setSendingMailId(r._id);
+    try {
+      await generateExitLetters(r._id);
+      dispatch(notifySuccess('F&F settlement email sent to employee.'));
+      exits.reload();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Failed to send F&F settlement email.'));
+    } finally {
+      setSendingMailId(null);
+    }
+  };
+  const handleDownload = async (record) => {
+    setDownloadingId(record._id);
+    try {
+      const res = await downloadFNFLetter(record._id);
+      const disposition = res.headers?.['content-disposition'];
+      let filename = 'FNF_Settlement.pdf';
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      let msg = err.uiMessage || 'Failed to download F&F letter.';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) msg = json.message;
+        } catch {}
+      }
+      dispatch(notifyError(msg));
+    } finally {
+      setDownloadingId(null);
+    }
   };
   const saveEdit = async (e) => {
     e.preventDefault();
@@ -113,7 +156,8 @@ export default function ExitsPage() {
                 <td className="py-2">
                   <div className="flex justify-end gap-1">
                     <Button size="sm" variant="secondary" onClick={() => setEdit({ _id: r._id, employeeName: userDisplayName(r.userId), status: r.status, interviewNotes: r.exitInterview?.notes || '', fnfRupees: r.fnfSettlement?.amount ? r.fnfSettlement.amount / 100 : '', fnfStatus: r.fnfSettlement?.status || 'Pending' })}>Manage</Button>
-                    <Button size="sm" onClick={() => letters(r)}><FileDown size={14} /> Letters</Button>
+                    <Button size="sm" onClick={() => handleSendMail(r)} disabled={sendingMailId === r._id}><Mail size={14} /> Send Mail</Button>
+                    <Button size="sm" variant="secondary" onClick={() => handleDownload(r)} disabled={downloadingId === r._id}><Download size={14} /> Download</Button>
                     {r.status === 'Initiated' && !r.relievingLetterUrl && !r.experienceLetterUrl && (
                       <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget(r)} aria-label="Delete exit">
                         <Trash2 size={14} />
