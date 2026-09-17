@@ -230,7 +230,7 @@ export default function ExitsPage() {
                 <thead>
                   <tr className="text-left text-muted">
                     <th className="pb-2">Employee</th>
-                    <th className="pb-2">Employee ID</th>
+                    <th className="pb-2">Emp ID</th>
                     <th className="pb-2">Designation</th>
                     <th className="pb-2">Email</th>
                     <th className="pb-2">Issued date</th>
@@ -244,7 +244,7 @@ export default function ExitsPage() {
                       <td className="py-2">
                         <div className="font-medium text-ink">{row.employeeName}</div>
                       </td>
-                      <td className="py-2">{row.employeeId}</td>
+                      <td className="py-2 font-mono text-xs text-muted">{row.employeeId}</td>
                       <td className="py-2">{row.designation}</td>
                       <td className="py-2">{row.email}</td>
                       <td className="py-2">{fmt(row.issuedAt)}</td>

@@ -351,7 +351,7 @@ export default function CompanySettingsPage() {
             {assetUpload('logo', 'Company logo', form.branding.logoUrl, Building2)}
             {assetUpload('stamp', 'Company stamp', form.branding.stampUrl, Stamp)}
             {assetUpload('logoWithStamp', 'Company Stamp and Signature', form.branding.logoWithStampUrl, Stamp, {
-              hint: 'Combined logo + stamp image used on letter seals when available.'
+              hint: 'Combined  stamp + siggnature image used on letter seals when available.'
             })}
             {assetUpload('signature', 'Authorized signature', form.branding.signatureUrl, PenTool)}
           </div>
