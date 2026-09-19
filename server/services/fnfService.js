@@ -57,6 +57,14 @@ export const buildFNFFields = ({ record, user, company, fnfFields = {} } = {}) =
   };
 };
 
+export const fnfFileName = (name) => {
+  const safe = String(name || 'Employee')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .replace(/_+/g, '_');
+  return `FNF_Settlement_${safe}.pdf`;
+};
+
 /**
  * Generate an FNFLetter (if a default template exists) without emailing.
  * Returns the generated PDF relative path when created, otherwise null.
@@ -87,9 +95,10 @@ export const generateAndEmailFNF = async ({ record, user, company, actor, fnfFie
   const subject = applyLetterText(subjectTpl, fields);
   const body = applyLetterText(bodyTpl, fields);
 
-  const send = () => sendAppointmentLetter({ to: user.email, subject, body, pdfPath: absPdf, fileName: `${name}-fnf.pdf` });
+  const fileName = fnfFileName(fields.employeeName);
+  const send = () => sendAppointmentLetter({ to: user.email, subject, body, pdfPath: absPdf, fileName });
   await queueMailJob(send);
   return pdf;
 };
 
-export default { generateFNFPdf, generateAndEmailFNF, buildFNFFields };
+export default { generateFNFPdf, generateAndEmailFNF, buildFNFFields, fnfFileName };
