@@ -315,7 +315,7 @@ const parseBoldMarks = (str) => {
   return segments.length ? segments : [{ text: s, bold: false }];
 };
 
-const formatOfferDate = (d) => {
+export const formatOfferDate = (d) => {
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return String(d || '');
   return `${dt.getDate()} ${MONTHS[dt.getMonth() + 1]} ${dt.getFullYear()}`;
@@ -1483,7 +1483,7 @@ export const generateCompanyDocPdf = async ({ title, paragraphs, company, employ
   };
 
   write(String(title || 'Document').toUpperCase(), { size: 13, bold: true, gap: 22 });
-  write(`Date: ${new Date(effectiveDate || Date.now()).toDateString()}`, { size: 10, gap: 16 });
+  write(`Date: ${formatOfferDate(effectiveDate || Date.now())}`, { size: 10, gap: 16 });
   if (employeeName) {
     write(`To: ${employeeName}${designation ? `, ${designation}` : ''}`, { size: 10, gap: 20 });
   }

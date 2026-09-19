@@ -6,7 +6,7 @@ import User from '../models/User.js';
 import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { generateCompanyDocPdf } from '../services/pdfService.js';
+import { generateCompanyDocPdf, formatOfferDate } from '../services/pdfService.js';
 import fnfService from '../services/fnfService.js';
 import { logActivity } from '../services/activityService.js';
 
@@ -94,7 +94,7 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
   const fnfFields = req.body?.fnfFields && typeof req.body.fnfFields === 'object' ? req.body.fnfFields : {};
   const name = fullName(user);
   const designation = user.employeeDetails?.designation || 'Employee';
-  const doj = user.employeeDetails?.dateOfJoining ? new Date(user.employeeDetails.dateOfJoining).toDateString() : 'the date of joining';
+  const doj = user.employeeDetails?.dateOfJoining ? formatOfferDate(user.employeeDetails.dateOfJoining) : 'the date of joining';
   const companyName = company?.name || 'the Company';
 
   const safeReason = String(fnfFields.reason || record.reason || 'Resignation').trim();
@@ -118,14 +118,14 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
   record.relievingLetterUrl = await generateCompanyDocPdf({
     title: 'Relieving Letter', company, employeeName: name, designation, effectiveDate: record.lastWorkingDay,
     paragraphs: [
-      `This is to certify that ${name} (${designation}) has been relieved from the services of ${companyName} with effect from the close of business on ${new Date(record.lastWorkingDay).toDateString()}.`,
+      `This is to certify that ${name} (${designation}) has been relieved from the services of ${companyName} with effect from the close of business on ${formatOfferDate(record.lastWorkingDay)}.`,
       `We confirm that all dues have been settled as per company policy. We wish ${name} success in future endeavours.`
     ]
   });
   record.experienceLetterUrl = await generateCompanyDocPdf({
     title: 'Experience Letter', company, employeeName: name, designation, effectiveDate: record.lastWorkingDay,
     paragraphs: [
-      `This is to certify that ${name} was employed with ${companyName} as ${designation} from ${doj} to ${new Date(record.lastWorkingDay).toDateString()}.`,
+      `This is to certify that ${name} was employed with ${companyName} as ${designation} from ${doj} to ${formatOfferDate(record.lastWorkingDay)}.`,
       `During the tenure, their conduct and performance were found to be satisfactory.`
     ]
   });

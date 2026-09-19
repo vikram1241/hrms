@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { resolveDefaultLetterTemplate } from '../controllers/letterTemplateController.js';
-import { GENERATED_DOC_DIR, generateLetterFromTemplate } from './pdfService.js';
+import { GENERATED_DOC_DIR, generateLetterFromTemplate, formatOfferDate } from './pdfService.js';
 import { DEFAULT_LETTER_EMAIL } from '../models/LetterTemplate.js';
 import { applyLetterText } from '../config/letterFields.js';
 import { formatINR } from '../utils/money.js';
@@ -24,8 +24,9 @@ export const buildFNFFields = ({ record, user, company, fnfFields = {} } = {}) =
     ? Math.round(normalizedAmount * 100)
     : Number(record?.fnfSettlement?.amount ?? 0) || 0;
 
-  const lwd = inputLastWorkingDay ? new Date(inputLastWorkingDay).toDateString() : (record?.lastWorkingDay ? new Date(record.lastWorkingDay).toDateString() : '');
-  const resDate = record?.resignationDate ? new Date(record.resignationDate).toDateString() : '';
+  const lwd = formatOfferDate(inputLastWorkingDay || record?.lastWorkingDay);
+  const resDate = formatOfferDate(record?.resignationDate);
+  const issueDate = formatOfferDate(fnfFields.date || new Date());
   const amountDisplay = formatINR(amountPaisa);
 
   return {
@@ -52,8 +53,8 @@ export const buildFNFFields = ({ record, user, company, fnfFields = {} } = {}) =
     lastWorkingDay: lwd,
     LastWorkingDay: lwd,
     lastworkingday: lwd,
-    date: lwd,
-    Date: lwd
+    date: issueDate,
+    Date: issueDate
   };
 };
 
