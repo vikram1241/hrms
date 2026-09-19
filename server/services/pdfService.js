@@ -956,7 +956,7 @@ export const generateOfferLetterPdf = async ({
     { text: 'Travel / Conveyance: ', bold: true },
     { text: 'Reimbursement of actual expenses as per Company policy (with supporting bills).', bold: false }
   ], { size: 10, gap: 18 });
-  // Role-based travel/other allowance (BDM / ASM / RBM only — not Admin, HR, IT).
+  // Role-based travel/other allowance (BDM / ASM / RSM only — not Admin, HR, IT).
   const travelAllowance = getOfferTravelAllowanceLine(position, department);
   if (travelAllowance) {
     writeRich([
