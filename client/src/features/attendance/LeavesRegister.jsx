@@ -78,7 +78,7 @@ export default function LeavesRegister({ onDecided }) {
   const clearDates = () => { setFrom(''); setTo(''); };
 
   return (
-    <Card id="leaves-register" className="mb-4 scroll-mt-6">
+    <Card className="mb-4">
       <CardBody>
         <div className="mb-3">
           <h3 className="text-base font-semibold text-ink">Leaves register</h3>

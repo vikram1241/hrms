@@ -185,7 +185,7 @@ export default function ExitsPage() {
             {pager.pageRows.map((r) => (
               <tr key={r._id} className="border-t border-line">
                 <td className="py-2 font-medium text-ink">{userDisplayName(r.userId)}</td>
-                <td className="py-2">{userEmpId(r.userId)}</td>
+                <td className="py-2 font-mono text-xs text-muted">{userEmpId(r.userId)}</td>
                 <td className="py-2">{fmt(r.resignationDate)}</td>
                 <td className="py-2">{fmt(r.lastWorkingDay)}</td>
                 <td className="py-2"><StatusBadge status={r.fnfSettlement?.status === 'Settled' ? 'paid' : 'pending'} label={r.fnfSettlement?.status || 'Pending'} /></td>
@@ -244,7 +244,7 @@ export default function ExitsPage() {
                       <td className="py-2">
                         <div className="font-medium text-ink">{row.employeeName}</div>
                       </td>
-                      <td className="py-2">{row.employeeId}</td>
+                      <td className="py-2 font-mono text-xs text-muted">{row.employeeId}</td>
                       <td className="py-2">{row.designation}</td>
                       <td className="py-2">{row.email}</td>
                       <td className="py-2">{fmt(row.issuedAt)}</td>
